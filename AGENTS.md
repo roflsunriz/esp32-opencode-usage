@@ -14,6 +14,6 @@ Get-Content -Raw -LiteralPath .\COMMON-AGENTS.md
    このファイルでは `esp32-opencode-usage` 固有の補足だけを記載する。
 
 ## 目的
-- esp32-2432s028r ili9341 esp-wroom-32 tft lcd 開発ボード上のLCDモニタに5時間制限のプログレスバーとパーセンテージ、ドル表記、週間制限のプログレスバーとパーセンテージ、ドル表記、1ヶ月制限のプログレスバーとパーセンテージ、ドル表記を表示する
-- https://opencode.ai/workspace/wrk_01M1J5EPMB84QKX30P1A3ZJTAQ/go （ログイン済みページ）の公式資産をde-minify, または実リクエストのキャプチャ解析などを通して実装する
+- esp32-2432s028r ili9341 esp-wroom-32 tft lcd 開発ボード上のLCDモニタに OpenCode Go の5時間制限のプログレスバーとパーセンテージ、ドル表記、週間制限のプログレスバーとパーセンテージ、ドル表記、1ヶ月制限のプログレスバーとパーセンテージ、ドル表記を表示する
+- OpenCode Go ページ https://opencode.ai/workspace/wrk_01M1J5EPMB84QKX30P1A3ZJTAQ/go （ログイン済みページ）の公式資産をde-minify, または実リクエストのキャプチャ解析などを通して実装する
 - ログインを自前実装し、認証情報を保持する
