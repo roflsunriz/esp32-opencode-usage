@@ -83,7 +83,13 @@ jobs:
           ESP32 フラッシュイメージ
 
           bootloader、partition table、boot_app0、applicationを含みます。
-          元の全フラッシュを退避してから、同じ機器へオフセット0で書き込みます。
+          いずれの方法でも、元の全フラッシュを退避してから同じ機器へ書き込みます。
+
+          既存の設定を保つ更新（同じpartition tableの本製品から更新する場合）:
+
+          python -m esptool --chip ESP32 --port COM3 write_flash 0x1000 bootloader.bin 0x8000 partitions.bin 0xe000 boot_app0.bin 0x10000 firmware.bin
+
+          初回導入（Wi-Fi・認証・画面設定を含むNVSを初期化します）:
 
           python -m esptool --chip ESP32 --port COM3 write_flash 0x0 firmware-full.bin
 

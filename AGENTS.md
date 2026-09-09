@@ -45,3 +45,7 @@ Get-Content -Raw -LiteralPath .\COMMON-AGENTS.md
 - ESP32へ認証を送る前に `firmware=opencode-go-lcd` と `setupSchema=3` のready/ping応答を確認する。別ファームウェアが動くUSBポートへ秘密情報を送信しない。
 - ESP32-2432S028の回路図ではXPT2046の`/PENIRQ`が外部10kΩプルアップ付きでGPIO36へ接続され、LOWがタッチを示す。GPIO36は入力専用なので内部プルアップを指定しない。XPT2046は直前の制御byteでPD0=1のままだとPENIRQを無効化するため、`display_controller.cpp`は回路図で確認した25/33/32/39のtouch SPIを使い、起動時にPD0=0の完了トランザクションを送り、その後の座標読出しは2MHz・median 5点で行う。PENIRQ変動の重複操作を避けるため、タップはGPIO36がHIGHで20ms安定するまで一度だけ受理する。根拠: ESP32-2432S028回路図のU3部、XPT2046 datasheet Table 8/PENIRQ Output、Adafruit TSC2046 driverの2MHz上限（2026-09-09確認）。
 - ILI9341 `rotation(1)`での実機DisplayタブタップはrawX約500..800、rawY約2500..2900だった。2026-09-09時点のこの基板では画面変換をaxes swap・非反転（`screenX`はrawY、`screenY`はrawX）とする。範囲は暫定でrawX=280..3860、rawY=340..3860を保ち、`type:"touch"`のraw/mapped診断で基板差を再確認してからのみ変更する。
+
+- BOOT(GPIO0)は通常入力として扱い、10msのesp_timerで両エッジ30msのデバウンスを行う。同期HTTPS/USB画像転送中もクリックを保持し、NVS保存とrotation 1/3切替はmainで処理する。2026-09-10のCH340実機ではRTS=falseのままDTR=true→falseでGPIO0押下/解放を再現できた。物理ボタン・タッチの検証とは区別する。`screenshot`はrotation 1の固定座標で読出して元のrotationへ戻し、反転状態を画像で確認できる。
+- NVS schemaは4だがUSBの`setupSchema`は互換形式の3を維持する。変更時に両者を混同してホストの認証送信判定を壊さない。旧schema 2/3から認証と消灯設定を保って移行する（`config_store.cpp`とnativeテスト参照）。配布物の`firmware-full.bin`を0へ書くとNVSも初期化するため、設定を保つ更新は個別イメージまたはPlatformIO uploadを使う。
+- LCDにfillScreen/fillRectで背景を消してから文字を描くと、実機の操作ごとにちらついた。`display_controller.cpp`の10KiB・16行帯canvasで完成画像を転送する方式を維持し、全画面150KiBバッファへ安易に戻さない。2026-09-10の実機で同一表示の使用量12回更新のACK中央値202.023ms→56.061ms、GRAM全画素一致を確認した。比較では画面に表示しないupdatedAtだけを変え、通信時間も含む値である。

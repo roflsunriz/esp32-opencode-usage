@@ -3,6 +3,8 @@
 // ESP32-2432S028R (CYD) wiring from the board schematic/reference.
 // The display uses the ESP32 VSPI peripheral routed through the GPIO matrix.
 namespace board_pins {
+// BOOT_SW is IO0; never drive it (it also selects the ROM download mode).
+constexpr int boot_button = 0;
 constexpr int tft_miso = 12;
 constexpr int tft_mosi = 13;
 constexpr int tft_sclk = 14;

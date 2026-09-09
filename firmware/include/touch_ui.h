@@ -110,7 +110,7 @@ inline uint16_t scaleRounded(uint16_t value, uint16_t minimum, uint16_t maximum,
   return static_cast<uint16_t>((numerator + denominator / 2) / denominator);
 }
 
-inline Point mapPoint(uint16_t rawX, uint16_t rawY) {
+inline Point mapPoint(uint16_t rawX, uint16_t rawY, bool flipped = false) {
   const uint16_t boundedX = clamp(rawX, kRawXMin, kRawXMax);
   const uint16_t boundedY = clamp(rawY, kRawYMin, kRawYMax);
   Point point;
@@ -118,6 +118,10 @@ inline Point mapPoint(uint16_t rawX, uint16_t rawY) {
   point.rawY = rawY;
   point.x = scaleRounded(boundedY, kRawYMin, kRawYMax, kDisplayWidth - 1);
   point.y = scaleRounded(boundedX, kRawXMin, kRawXMax, kDisplayHeight - 1);
+  if (flipped) {
+    point.x = kDisplayWidth - 1 - point.x;
+    point.y = kDisplayHeight - 1 - point.y;
+  }
   return point;
 }
 

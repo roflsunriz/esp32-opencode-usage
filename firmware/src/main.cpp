@@ -239,6 +239,7 @@ void addPeriod(JsonObject object, const usage_model::PeriodUsage &period) {
 }
 
 void addBacklightState(JsonDocument &document, bool includeRemaining) {
+  document["screenFlipped"] = wifiConfig.screenFlipped;
   document["backlightOn"] = display.backlightOn();
   document["backlightTimeoutSec"] = display.backlightTimeoutSec();
   if (includeRemaining) {
@@ -352,7 +353,7 @@ void sendPingAck() {
   document["freeHeap"] = ESP.getFreeHeap();
   document["minFreeHeap"] = ESP.getMinFreeHeap();
   document["firmware"] = "opencode-go-lcd";
-  document["setupSchema"] = config_store::kConfigSchemaVersion;
+  document["setupSchema"] = config_store::kSetupSchemaVersion;
   document["pollIntervalSec"] = wifiConfig.pollIntervalSec;
   document["uptimeMs"] = millis();
   document["hasUsage"] = hasUsage;
@@ -368,7 +369,7 @@ void sendReady() {
   document["version"] = usage_model::kProtocolVersion;
   document["type"] = "ready";
   document["firmware"] = "opencode-go-lcd";
-  document["setupSchema"] = config_store::kConfigSchemaVersion;
+  document["setupSchema"] = config_store::kSetupSchemaVersion;
   addBacklightState(document, true);
   serializeJson(document, Serial);
   Serial.println();
@@ -482,6 +483,25 @@ bool processTouch() {
   return true;
 }
 
+bool processBootButton() {
+  if (!display.consumeBootClick()) {
+    return false;
+  }
+  display.wakeBacklight();
+  wifiConfig.screenFlipped = !wifiConfig.screenFlipped;
+  char error[kErrorCapacity] = {};
+  if (!configStore.save(wifiConfig, error, sizeof(error))) {
+    wifiConfig.screenFlipped = !wifiConfig.screenFlipped;
+    sendError(error);
+    return true;
+  }
+  display.setScreenFlipped(wifiConfig.screenFlipped);
+  display.redraw(hasUsage ? &latestUsage : nullptr,
+                 wifiConfig.backlightTimeoutSec);
+  sendDisplayAck(nullptr);
+  return true;
+}
+
 bool processFrame(const char *payload, const char *source) {
   if (payload == nullptr || payload[0] == '\0') {
     sendError("empty JSON frame");
@@ -556,6 +576,8 @@ bool processFrame(const char *payload, const char *source) {
       sendError(error);
       return false;
     }
+    // The PC setup protocol owns Wi-Fi/auth/timeout, not the BOOT preference.
+    parsed.screenFlipped = wifiConfig.screenFlipped;
     if (!configStore.save(parsed, error, sizeof(error))) {
       sendError(error);
       return false;
@@ -673,12 +695,11 @@ void setup() {
   serialLine.reserve(kSerialLineCapacity);
   delay(50);
 
-  display.begin();
-  display.renderNoData("Set up WiFi on your PC");
-
   config_store::reset(wifiConfig);
   configStore.begin();
   const bool wifiConfigured = configStore.load(wifiConfig);
+  display.begin(wifiConfig.screenFlipped);
+  display.renderNoData("Set up WiFi on your PC");
   // load() intentionally returns false for a valid disabled Wi-Fi record.
   // Its display timeout is still persisted and must survive that restart.
   display.setBacklightTimeoutSec(wifiConfig.backlightTimeoutSec);
@@ -693,8 +714,9 @@ void setup() {
 
 void loop() {
   pollSerial();
+  const bool bootHandled = processBootButton();
   const bool touchHandled = processTouch();
-  if (touchHandled) {
+  if (touchHandled || bootHandled) {
     deferNetworkUntilMs = millis() + kTouchNetworkDeferralMs;
   }
   sendBacklightEventIfChanged();
