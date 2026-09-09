@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory)][string]$Port,
     [string]$Python = 'python',
     [string]$BackupPath = '.private\backups\original-flash.bin'
