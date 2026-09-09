@@ -1,0 +1,57 @@
+name: 不具合報告
+description: 再現可能な不具合を報告する
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Cookie、Bearer token、Wi-Fiパスワード、個人情報は記載しないでください。
+  - type: input
+    id: version
+    attributes:
+      label: バージョンまたはコミット
+      placeholder: v0.1.0 または 0123456
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: 対象
+      options:
+        - ホスト側
+        - ESP32ファームウェア
+        - USBシリアル連携
+        - LAN HTTP連携
+        - CIまたはリリース
+        - その他
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 環境
+      description: OS、Bun、PlatformIO、ボード、LCD、接続方法を書いてください。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順
+      description: 再現に必要な操作を順番に書いてください。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待した結果
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 実際の結果
+      description: 秘密情報を除いたエラーやログを含めてください。
+    validations:
+      required: true

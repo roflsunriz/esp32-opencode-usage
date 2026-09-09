@@ -1,0 +1,27 @@
+{
+  "name": "esp32-opencode-usage",
+  "version": "0.1.0",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/bun": "latest",
+    "eslint": "^10.10.0",
+    "prettier": "^3.6.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.46.0"
+  },
+  "engines": {
+    "bun": ">=1.4"
+  },
+  "private": true,
+  "scripts": {
+    "start": "bun host/cli.ts",
+    "lint": "eslint host scripts/build.ts",
+    "format": "prettier --write host scripts/build.ts package.json tsconfig.json eslint.config.js",
+    "format:check": "prettier --check host scripts/build.ts package.json tsconfig.json eslint.config.js",
+    "type-check": "tsc --noEmit",
+    "build": "bun scripts/build.ts",
+    "test": "bun test host",
+    "audit": "bun audit"
+  },
+  "type": "module"
+}

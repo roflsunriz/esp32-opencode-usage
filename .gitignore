@@ -1,1 +1,13 @@
 COMMON-AGENTS.md
+.private/
+.pio/
+.platformio/
+subagents/
+node_modules/
+dist/
+.mypy_cache/
+__pycache__/
+*.pyc
+release/
+esp32-opencode-usage-*.zip
+esp32-opencode-usage-*.tar.gz

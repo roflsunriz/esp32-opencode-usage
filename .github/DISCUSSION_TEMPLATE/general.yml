@@ -1,0 +1,15 @@
+name: 一般
+description: プロジェクト全般の相談や共有
+title: "[General] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Cookie、Bearer token、Wi-Fiパスワード、個人情報は投稿しないでください。
+  - type: textarea
+    id: topic
+    attributes:
+      label: 内容
+      description: 相談、共有したいこと、期待する結果を書いてください。
+    validations:
+      required: true

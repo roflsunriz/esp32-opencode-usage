@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: セキュリティ報告手順
+    url: https://github.com/roflsunriz/esp32-opencode-usage/blob/main/SECURITY.md
+    about: 認証情報、任意コード実行、秘密情報の漏えいは公開 issue に書かないでください。

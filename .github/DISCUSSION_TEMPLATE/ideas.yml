@@ -1,0 +1,23 @@
+name: アイデア
+description: 機能や表示の改善案を提案する
+title: "[Idea] "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 解決したいこと
+      description: 現在の利用上の困りごとを説明してください。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 提案
+      description: どのような動作や表示を期待するかを書いてください。
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: 制約
+      description: 対応OS、実機、通信、互換性などの条件があれば書いてください。

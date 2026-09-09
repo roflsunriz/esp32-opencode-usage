@@ -1,0 +1,123 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release assets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Install host dependencies
+        run: bun install --frozen-lockfile
+      - name: Build host artifact
+        run: bun run build
+      - name: Run host tests
+        run: bun run test
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install PlatformIO
+        run: python -m pip install --upgrade platformio
+      - name: Build firmware artifact
+        run: pio run -e esp32dev
+      - name: Run native firmware tests
+        run: pio test -e native
+      - name: Extract release notes from CHANGELOG
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          awk -v version="$version" '
+            $0 ~ "^## \\[" version "(\\]| - )" { found=1; print; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          test -s release-notes.md
+      - name: Assemble host and firmware archives
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p release/host release/firmware
+          cp -R dist release/host/
+          cp -R host release/host/
+          cp -R scripts release/host/
+          cp start.cmd release/host/
+          cp package.json bun.lock requirements.txt requirements-dev.txt tsconfig.json eslint.config.js platformio.ini release/host/
+          cp -R firmware release/host/
+          cp README.md how-to-update.md verification.md release/host/
+          cp LICENSE SECURITY.md release/host/
+          mkdir -p release/host/docs
+          cp -R docs/. release/host/docs/
+          find .pio/build/esp32dev -maxdepth 1 -type f \( -name '*.bin' -o -name '*.elf' -o -name '*.map' \) -exec cp {} release/firmware/ \;
+          boot_app0="$(find .platformio -path '*/framework-arduinoespressif32/tools/partitions/boot_app0.bin' -print -quit)"
+          test -n "$boot_app0"
+          cp "$boot_app0" release/firmware/boot_app0.bin
+          esptool_help="$(pio pkg exec --package "platformio/tool-esptoolpy" -- esptool.py --help 2>&1)"
+          if printf '%s' "$esptool_help" | grep -q "merge-bin"; then
+            merge_operation=(merge-bin --flash-mode dio --flash-size 4MB)
+          else
+            merge_operation=(merge_bin --flash_mode dio --flash_size 4MB)
+          fi
+          pio pkg exec --package "platformio/tool-esptoolpy" -- esptool.py --chip ESP32 "${merge_operation[@]}" \
+            -o release/firmware/firmware-full.bin \
+            0x1000 .pio/build/esp32dev/bootloader.bin \
+            0x8000 .pio/build/esp32dev/partitions.bin \
+            0xe000 "$boot_app0" \
+            0x10000 .pio/build/esp32dev/firmware.bin
+          cat > release/firmware/firmware-flash.txt <<'EOF'
+          ESP32 フラッシュイメージ
+
+          bootloader、partition table、boot_app0、applicationを含みます。
+          元の全フラッシュを退避してから、同じ機器へオフセット0で書き込みます。
+
+          python -m esptool --chip ESP32 --port COM3 write_flash 0x0 firmware-full.bin
+
+          COM3は対象ポートに置き換えます。esptool v5ではwrite-flash表記を使います。
+
+          個別ファイルを使う場合のオフセット:
+          0x1000 bootloader.bin
+          0x8000 partitions.bin
+          0xe000 boot_app0.bin
+          0x10000 firmware.bin
+          EOF
+          cp platformio.ini release/firmware/
+          cp -R firmware release/firmware/firmware
+          mkdir -p release/firmware/app-objects
+          cp .pio/build/esp32dev/src/*.o release/firmware/app-objects/
+          mkdir -p release/firmware/licenses
+          find .pio/libdeps/esp32dev .platformio/packages/framework-arduinoespressif32 -maxdepth 3 -type f \( -iname "license*" -o -iname "copying*" \) -print0 | while IFS= read -r -d "" license; do
+            destination="$(printf "%s" "$license" | tr "/ " "__")"
+            cp "$license" "release/firmware/licenses/$destination"
+          done
+          cp LICENSE docs/dependencies.md release/firmware/
+          test -n "$(find release/firmware -type f -print -quit)"
+          tar -czf "esp32-opencode-usage-${version}-host.tar.gz" -C release host
+          (cd release/host && python -m zipfile -c "../../esp32-opencode-usage-${version}-host-windows.zip" .)
+          tar -czf "esp32-opencode-usage-${version}-firmware.tar.gz" -C release firmware
+          (cd release/firmware && python -m zipfile -c "../../esp32-opencode-usage-${version}-firmware.zip" .)
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "esp32-opencode-usage-${GITHUB_REF_NAME#v}-host.tar.gz" \
+            "esp32-opencode-usage-${GITHUB_REF_NAME#v}-host-windows.zip" \
+            "esp32-opencode-usage-${GITHUB_REF_NAME#v}-firmware.tar.gz" \
+            "esp32-opencode-usage-${GITHUB_REF_NAME#v}-firmware.zip" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release-notes.md

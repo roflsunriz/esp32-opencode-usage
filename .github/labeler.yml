@@ -1,0 +1,27 @@
+host:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "host/**"
+          - "package.json"
+          - "bun.lock"
+          - "tsconfig.json"
+          - "eslint.config.js"
+firmware:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "firmware/**"
+          - "platformio.ini"
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "*.md"
+          - "docs/**"
+github-actions:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**"
+security:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "SECURITY.md"
+          - "host/auth/**"

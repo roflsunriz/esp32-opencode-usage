@@ -14,6 +14,32 @@ Get-Content -Raw -LiteralPath .\COMMON-AGENTS.md
    このファイルでは `esp32-opencode-usage` 固有の補足だけを記載する。
 
 ## 目的
+
 - esp32-2432s028r ili9341 esp-wroom-32 tft lcd 開発ボード上のLCDモニタに OpenCode Go の5時間制限のプログレスバーとパーセンテージ、使用済みドル表記/最大制限ドル表記、週間制限のプログレスバーとパーセンテージ、使用済みドル表記/最大制限ドル表記、1ヶ月制限のプログレスバーとパーセンテージ、使用済みドル表記/最大制限ドル表記を表示する
 - OpenCode Go ページ https://opencode.ai/workspace/wrk_01M1J5EPMB84QKX30P1A3ZJTAQ/go （ログイン済みページ）の公式資産をde-minify, または実リクエストのキャプチャ解析などを通して実装する
 - ログインを自前実装し、認証情報を保持する
+
+## 取得方式と認証（2026-09-09実測）
+
+- Goコンソールの `queryLiteSubscription_query` は `/_server` のサーバー関数を呼ぶ。関数IDはデプロイごとに変わるため、認証済みGoページが参照する公式JavaScriptから検出する。固定ハッシュを製品コードに埋め込まない。
+- `rollingUsage` / `weeklyUsage` / `monthlyUsage` に `usage`、`limit`、`usagePercent`、`resetInSec` がある。金額は1ドル=100,000,000単位。モデルの倍率を反映した制限計算用の換算額であり、請求額と混同しない。割合は公式の丸め値を使い、丸めた割合から金額を逆算しない。詳細は `host/api.ts`、`host/usage.ts`。
+- 現在のレスポンスはSerovalのJavaScriptストリーム。外部コードをevalせず、必要な3期間の数値だけを厳格に読み取る。未知の形式、欠損、取得エラーを0%として表示しない。
+- 公式ログインはGitHub/Google認証を利用し、コンソールのHttpOnly `auth` Cookieで使用量を取得する。初回ログインはPCで行い、認証Cookie・Wi-Fi設定・ワークスペースをESP32のNVSへ保存する。通常運用はESP32のHTTPS直取得で、PCは不要、USBは給電だけにする。PC中継方式へ戻さない。`.private/` は認証、バックアップ、調査資産を置くGit管理外領域で、内容をログやコミットへ含めない。
+
+## 実機検証と復旧
+
+- USB機器を書き換える前に、全フラッシュを読み取り、実機とのdigest一致を確認する。検証後は全フラッシュを書き戻して再照合する。アプリ領域だけの退避ではNVSや設定を復旧できない。
+- 今回接続されたESP32は4MBフラッシュ、COM3だった。ポートと容量は毎回実測し、固定の機器識別情報を一般仕様にしない。
+- PlatformIOのキャッシュは必要に応じ `PLATFORMIO_CORE_DIR` でリポジトリ内 `.platformio` に設定する。Bunの一時領域が権限制限に当たる環境では `TEMP`/`TMP` と `BUN_INSTALL_CACHE_DIR` を `.private/` 内へ設定して実行する。
+
+## 実装上の注意（実機検証から判明）
+
+- WindowsのCH340実機でserialport 13はBunでもNode.js単独でもwriteが停止した。import・列挙・openだけでは検出できない。製品のUSB通信は `host/serial-worker.py` をPython/pySerialで起動して行う。実機で連続送受信を検証せずネイティブNode bindingへ戻さない。
+- Bunの子プロセスstdinは `flush()` のPromiseを処理する。未処理の非同期EPIPEはホスト全体を終了させる。workerのcloseはシリアルを閉じて終了し、親もEOFと終了タイムアウトを扱う。退行テストは `host/device.test.ts`。
+- Preferencesの `putString("")` は成功時も0を返すため、単純な `>0` 判定ではWi-Fi削除が失敗する。現在はバージョンとCRC付きの単一blobへ保存し、相関ID付きACKを保存完了後に返す。
+- LCDのGRAMはAdafruitの公開SPI低レベルAPIでRAMRDを発行して読み出せた。`screenshot` はUSB診断専用、2MHz、RGBの3バイト/画素、960バイトの行バッファ。読み出した画像で表示を確認できる。
+- PlatformIO nativeのWindows LLVM対応は `firmware/test/native-toolchain.py` のビルドmiddlewareで適用する。通常のpreスクリプトでCCを置換するだけではnative builderがGCC設定へ戻す。UnityのnativeテストにはC++の `main` と `UNITY_INCLUDE_DOUBLE` が必要。
+
+- TLS信頼束はGoogle公式のGTS Root R4 (`gtsr4.pem`) とGlobalSign Root CA (`gsr1.pem`)。GlobalSign ECC R4 (`gsr4.pem`) は今回のサーバーchainとは異なる。PEMを手転記すると一文字の差でもTLS接続が失敗するため、`scripts/update-ca.py` で生成し `--check` で公式ファイルと完全一致を確認する。
+- ESP32のDRAMには大きな固定HTML/JSバッファを置かない。64KiBの転送上限を逐次走査し、使用量応答だけ4KiBへ保持する。認証レコードは約4KiBあり、設定解析や保存時の複製をloopタスクのstackへ置かない。
+- ESP32へ認証を送る前に `firmware=opencode-go-lcd` と `setupSchema=2` のready/ping応答を確認する。別ファームウェアが動くUSBポートへ秘密情報を送信しない。

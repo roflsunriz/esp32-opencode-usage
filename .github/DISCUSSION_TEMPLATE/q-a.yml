@@ -1,0 +1,27 @@
+name: Q&A
+description: 使い方や設定について質問する
+title: "[Q&A] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Cookie、Bearer token、Wi-Fiパスワード、個人情報は投稿しないでください。
+  - type: textarea
+    id: question
+    attributes:
+      label: 質問
+      description: 何を実現したいかを具体的に書いてください。
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 環境
+      description: OS、Bun、PlatformIO、ボード、LCD、接続方法を書いてください。
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: 試したこと
+      description: 手順、結果、秘密情報を除いたエラーやログを書いてください。
