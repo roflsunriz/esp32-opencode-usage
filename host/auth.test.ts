@@ -206,7 +206,7 @@ describe("認証情報の保存", () => {
     const protectedValue = await protect(source);
     expect(protectedValue).not.toContain(source);
     expect(await unprotect(protectedValue)).toBe(source);
-  });
+  }, 35_000); // Two separately bounded 15-second PowerShell operations on cold CI runners.
 
   test("暗号化済みの封筒だけを保存し、読み戻しと削除ができる", async () => {
     const directory = await mkdtemp(join(tmpdir(), "opencode-auth-"));
