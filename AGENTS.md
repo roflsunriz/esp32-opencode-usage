@@ -42,4 +42,6 @@ Get-Content -Raw -LiteralPath .\COMMON-AGENTS.md
 
 - TLS信頼束はGoogle公式のGTS Root R4 (`gtsr4.pem`) とGlobalSign Root CA (`gsr1.pem`)。GlobalSign ECC R4 (`gsr4.pem`) は今回のサーバーchainとは異なる。PEMを手転記すると一文字の差でもTLS接続が失敗するため、`scripts/update-ca.py` で生成し `--check` で公式ファイルと完全一致を確認する。
 - ESP32のDRAMには大きな固定HTML/JSバッファを置かない。64KiBの転送上限を逐次走査し、使用量応答だけ4KiBへ保持する。認証レコードは約4KiBあり、設定解析や保存時の複製をloopタスクのstackへ置かない。
-- ESP32へ認証を送る前に `firmware=opencode-go-lcd` と `setupSchema=2` のready/ping応答を確認する。別ファームウェアが動くUSBポートへ秘密情報を送信しない。
+- ESP32へ認証を送る前に `firmware=opencode-go-lcd` と `setupSchema=3` のready/ping応答を確認する。別ファームウェアが動くUSBポートへ秘密情報を送信しない。
+- ESP32-2432S028の回路図ではXPT2046の`/PENIRQ`が外部10kΩプルアップ付きでGPIO36へ接続され、LOWがタッチを示す。GPIO36は入力専用なので内部プルアップを指定しない。XPT2046は直前の制御byteでPD0=1のままだとPENIRQを無効化するため、`display_controller.cpp`は回路図で確認した25/33/32/39のtouch SPIを使い、起動時にPD0=0の完了トランザクションを送り、その後の座標読出しは2MHz・median 5点で行う。PENIRQ変動の重複操作を避けるため、タップはGPIO36がHIGHで20ms安定するまで一度だけ受理する。根拠: ESP32-2432S028回路図のU3部、XPT2046 datasheet Table 8/PENIRQ Output、Adafruit TSC2046 driverの2MHz上限（2026-09-09確認）。
+- ILI9341 `rotation(1)`での実機DisplayタブタップはrawX約500..800、rawY約2500..2900だった。2026-09-09時点のこの基板では画面変換をaxes swap・非反転（`screenX`はrawY、`screenY`はrawX）とする。範囲は暫定でrawX=280..3860、rawY=340..3860を保ち、`type:"touch"`のraw/mapped診断で基板差を再確認してからのみ変更する。

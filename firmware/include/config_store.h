@@ -11,7 +11,8 @@ constexpr size_t kAuthCookieCapacity = 4097;
 constexpr size_t kWorkspaceCapacity = 96;
 constexpr size_t kQueryIdCapacity = 65;
 constexpr uint32_t kDefaultPollIntervalSec = 60;
-constexpr uint32_t kConfigSchemaVersion = 2;
+constexpr uint32_t kDefaultBacklightTimeoutSec = 60;
+constexpr uint32_t kConfigSchemaVersion = 3;
 
 struct WiFiConfig {
   bool enabled = false;
@@ -21,6 +22,7 @@ struct WiFiConfig {
   char workspace[kWorkspaceCapacity] = {};
   char queryId[kQueryIdCapacity] = {};
   uint32_t pollIntervalSec = kDefaultPollIntervalSec;
+  uint32_t backlightTimeoutSec = kDefaultBacklightTimeoutSec;
 };
 
 void reset(WiFiConfig &config);

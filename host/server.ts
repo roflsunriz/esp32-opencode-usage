@@ -4,6 +4,10 @@ import { OpenCodeClient } from "./api.ts";
 import { dashboard } from "./dashboard.ts";
 import { DeviceConnection } from "./device.ts";
 import { UsageService } from "./service.ts";
+import {
+  defaultBacklightTimeout,
+  parseBacklightTimeout,
+} from "./display-settings.ts";
 
 function equalSecret(actual: string, expected: string): boolean {
   const a = Buffer.from(actual);
@@ -164,11 +168,26 @@ export function startServer(service: UsageService, options: { port: number }) {
               ssid: body.ssid,
               password: body.password,
               pollIntervalSec: body.pollIntervalSec,
+              backlightTimeoutSec: parseBacklightTimeout(
+                body.backlightTimeoutSec ?? defaultBacklightTimeout,
+              ),
             });
             return json({ ok: true });
           }
           case "/api/clear-device":
             await service.clearDevice();
+            return json({ ok: true });
+          case "/api/display":
+            await service.device.send({
+              version: 1,
+              type: "display",
+              backlightTimeoutSec: parseBacklightTimeout(
+                body.backlightTimeoutSec,
+              ),
+            });
+            return json({ ok: true });
+          case "/api/wake":
+            await service.device.send({ version: 1, type: "wake" });
             return json({ ok: true });
           default:
             return json({ error: "Not found" }, 404);

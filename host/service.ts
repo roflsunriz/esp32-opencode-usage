@@ -2,6 +2,7 @@ import { OpenCodeClient } from "./api.ts";
 import type { StoredSession } from "./auth/index.ts";
 import { DeviceConnection, type DeviceConfig } from "./device.ts";
 import type { UsageFrame } from "./usage.ts";
+import { defaultBacklightTimeout } from "./display-settings.ts";
 
 export class UsageService {
   readonly device = new DeviceConnection();
@@ -83,6 +84,7 @@ export class UsageService {
     ssid: string;
     password: string;
     pollIntervalSec: number;
+    backlightTimeoutSec?: number;
   }): Promise<void> {
     const session = this.session;
     if (!session) throw new Error("先にOpenCodeへログインしてください。");
@@ -99,6 +101,8 @@ export class UsageService {
       type: "config",
       enabled: true,
       ...settings,
+      backlightTimeoutSec:
+        settings.backlightTimeoutSec ?? defaultBacklightTimeout,
       authCookie: session.cookie,
       workspace: session.workspace,
       queryId,
@@ -116,6 +120,7 @@ export class UsageService {
       workspace: "",
       queryId: "",
       pollIntervalSec: 60,
+      backlightTimeoutSec: defaultBacklightTimeout,
     };
     await this.device.send(config);
   }

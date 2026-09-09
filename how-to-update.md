@@ -69,3 +69,7 @@ powershell -ExecutionPolicy Bypass -File scripts/restore-firmware.ps1 -Port COM3
 `package.json` のバージョンを更新し、`CHANGELOG.md` の `Unreleased` を `## [X.Y.Z] - YYYY-MM-DD` に移します。検証を通してから `vX.Y.Z` タグを公開すると、ワークフローが該当変更履歴を抽出し、ホストとファームウェアのアーカイブを作成します。
 
 公開前にアーカイブを展開し、`start.cmd`、`host/serial-worker.py`、依存設定、ファームウェアのイメージ、復旧手順、第三者ライセンスを確認します。ESP32単独のHTTPS取得を配布物の機能として案内する場合は、CA証明書、時刻同期、認証Cookie保存、再起動後の直接更新を実機で確認してから公開します。タグやリリースの公開操作はこの手順では行いません。
+
+## 消灯設定の移行
+
+schema 2から3への更新時はWi-Fi・認証を保持し、消灯時間を初期値1分に設定します。更新後はLCDのDisplayタブ、またはPCの消灯設定から変更できます。選択値の保存、消灯、タッチによる起床を確認してください。

@@ -13,6 +13,7 @@ export interface DeviceConfig {
   workspace: string;
   queryId: string;
   pollIntervalSec: number;
+  backlightTimeoutSec?: number;
   requestId?: string;
 }
 
@@ -48,11 +49,13 @@ export class DeviceConnection {
   private lastFrame?: UsageFrame;
   private stopped = false;
   private message = "USB未接続";
-  private pendingConfig?: Completion & { requestId: string };
+  private pendingConfig?: Completion & { requestId: string; accepted: string };
   private readonly pendingWrites = new Map<number, Completion>();
   private sequence = 0;
   private lastDirectUpdate?: number;
   private compatible = false;
+  private backlightTimeoutSec?: number;
+  private backlightOn?: boolean;
 
   clearCachedFrame(): void {
     this.lastFrame = undefined;
@@ -73,6 +76,8 @@ export class DeviceConnection {
     compatible: boolean;
     message: string;
     lastDirectUpdate?: number;
+    backlightTimeoutSec?: number;
+    backlightOn?: boolean;
   } {
     return {
       path: this.path,
@@ -80,6 +85,8 @@ export class DeviceConnection {
       compatible: this.compatible,
       message: this.message,
       lastDirectUpdate: this.lastDirectUpdate,
+      backlightTimeoutSec: this.backlightTimeoutSec,
+      backlightOn: this.backlightOn,
     };
   }
 
@@ -140,9 +147,15 @@ export class DeviceConnection {
         const response = value as Record<string, unknown>;
         if (
           response.firmware === "opencode-go-lcd" &&
-          response.setupSchema === 2
+          response.setupSchema === 3
         )
           this.compatible = true;
+        if (this.compatible) {
+          if (typeof response.backlightTimeoutSec === "number")
+            this.backlightTimeoutSec = response.backlightTimeoutSec;
+          if (typeof response.backlightOn === "boolean")
+            this.backlightOn = response.backlightOn;
+        }
         if (response.type === "ready") {
           this.message = "LCD起動済み";
           if (this.lastFrame)
@@ -158,7 +171,7 @@ export class DeviceConnection {
             this.message = "ESP32の直接更新を確認しました";
           }
           if (
-            response.accepted === "config" &&
+            response.accepted === this.pendingConfig?.accepted &&
             response.requestId === this.pendingConfig?.requestId
           )
             this.finishConfig();
@@ -288,24 +301,39 @@ export class DeviceConnection {
       | UsageFrame
       | DeviceConfig
       | { version: 1; type: "ping" }
+      | {
+          version: 1;
+          type: "display";
+          backlightTimeoutSec: number;
+          requestId?: string;
+        }
+      | { version: 1; type: "wake"; requestId?: string }
       | { version: 1; type: "error"; message: string },
   ): Promise<void> {
     if (frame.type === "usage") this.lastFrame = frame;
     if (frame.type === "error") this.clearCachedFrame();
     const child = this.worker;
     if (!child || !this.connected || child.exitCode !== null) {
-      if (frame.type === "config")
+      if (
+        frame.type === "config" ||
+        frame.type === "display" ||
+        frame.type === "wake"
+      )
         throw new Error("Wi-Fi設定の保存にはUSB接続が必要です。");
       return;
     }
     let outgoing = frame;
     let acknowledged: Promise<void> | undefined;
-    if (frame.type === "config") {
+    if (
+      frame.type === "config" ||
+      frame.type === "display" ||
+      frame.type === "wake"
+    ) {
       if (!this.compatible)
         throw new Error(
           "初期設定用ファームウェアを確認できません。LCD用ファームウェアを書き込み、再接続してください。",
         );
-      this.lastDirectUpdate = undefined;
+      if (frame.type === "config") this.lastDirectUpdate = undefined;
       if (this.pendingConfig) throw new Error("別のWi-Fi設定を保存中です。");
       const requestId = randomBytes(8).toString("hex");
       outgoing = { ...frame, requestId };
@@ -319,7 +347,13 @@ export class DeviceConnection {
             ),
           10_000,
         );
-        this.pendingConfig = { requestId, resolve, reject, timer };
+        this.pendingConfig = {
+          requestId,
+          accepted: frame.type,
+          resolve,
+          reject,
+          timer,
+        };
       });
     }
     const id = ++this.sequence;

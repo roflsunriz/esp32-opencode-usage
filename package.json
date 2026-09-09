@@ -20,7 +20,7 @@
     "format:check": "prettier --check host scripts/build.ts package.json tsconfig.json eslint.config.js",
     "type-check": "tsc --noEmit",
     "build": "bun scripts/build.ts",
-    "test": "bun test host",
+    "test": "bun test ./host",
     "audit": "bun audit"
   },
   "type": "module"

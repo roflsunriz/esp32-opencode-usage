@@ -109,3 +109,29 @@ test("credentials are never sent to a device without the setup firmware handshak
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("display settings and wake each wait for their corresponding ACK", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lcd-worker-"));
+  const device = new DeviceConnection(
+    () => ["node", fixture, join(directory, "frames.jsonl")],
+    async () => [{ path: "TEST", label: "fake" }],
+  );
+  try {
+    await device.connect("TEST");
+    for (const frame of [
+      {
+        version: 1 as const,
+        type: "display" as const,
+        backlightTimeoutSec: 15,
+      },
+      { version: 1 as const, type: "wake" as const },
+    ]) {
+      const started = Date.now();
+      await device.send(frame);
+      expect(Date.now() - started).toBeGreaterThanOrEqual(100);
+    }
+  } finally {
+    await device.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

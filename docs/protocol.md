@@ -120,3 +120,22 @@ MOSI=13、MISO=12、SCLK=14、CS=15、DC=2、BL=21、RST=-1。ILI9341の描画�
 - [pySerial公式リポジトリ](https://github.com/pyserial/pyserial)
 - [pySerial公式ドキュメント](https://pyserial.readthedocs.io/en/latest/)
 - [Adafruit ILI9341](https://github.com/adafruit/Adafruit_ILI9341)
+
+## 自動消灯の設定
+
+`backlightTimeoutSec` は15、30、60、120、300、600、1800、3600、7200だけを受理する。初期値60。`config`にも含められ、`display`では既存のWi-Fiと認証を保持して時間だけを保存する。
+
+```json
+{
+  "version": 1,
+  "type": "display",
+  "backlightTimeoutSec": 30,
+  "requestId": "0123456789abcdef"
+}
+```
+
+`wake` は点灯して期限を再設定する。両操作とも同じ `requestId` と、操作名の `accepted` を持つACKを返す。状態には `backlightOn`、`backlightTimeoutSec` が含まれ、pingには残り時間とGPIO21読戻し値も含む。通信や再描画自体は期限を延長しない。
+
+消灯判定はHTTPS通信とは独立した50ms周期のタイマーで行う。タッチの起床はGPIO36の割り込みで受け付け、実際の画面設定はLCD上のUsage/Displayタブから行う。
+
+NVS schema 2のCRCが正常ならWi-Fi・認証などを保持し、消灯時間60秒を補ってschema 3へ移行する。

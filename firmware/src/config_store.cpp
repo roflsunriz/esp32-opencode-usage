@@ -6,13 +6,15 @@
 #include <cstdio>
 #include <cstring>
 
+#include "backlight_timer.h"
+
 namespace config_store {
 namespace {
 
 Preferences preferences;
 constexpr char kConfigKey[] = "config";
 
-struct PersistedConfig {
+struct PersistedConfigV2 {
   uint32_t schemaVersion;
   uint8_t enabled;
   uint8_t reserved[3];
@@ -25,9 +27,33 @@ struct PersistedConfig {
   uint32_t checksum;
 };
 
-static_assert(offsetof(PersistedConfig, checksum) + sizeof(uint32_t) ==
-                  sizeof(PersistedConfig),
-              "PersistedConfig must have checksum as its final field");
+struct PersistedConfigV3 {
+  uint32_t schemaVersion;
+  uint8_t enabled;
+  uint8_t reserved[3];
+  char ssid[kSsidCapacity];
+  char password[kPasswordCapacity];
+  char authCookie[kAuthCookieCapacity];
+  char workspace[kWorkspaceCapacity];
+  char queryId[kQueryIdCapacity];
+  uint32_t pollIntervalSec;
+  uint32_t backlightTimeoutSec;
+  uint32_t checksum;
+};
+
+union PersistedStorage {
+  PersistedConfigV2 v2;
+  PersistedConfigV3 v3;
+};
+
+PersistedStorage stored;
+
+static_assert(offsetof(PersistedConfigV2, checksum) + sizeof(uint32_t) ==
+                  sizeof(PersistedConfigV2),
+              "PersistedConfigV2 must have checksum as its final field");
+static_assert(offsetof(PersistedConfigV3, checksum) + sizeof(uint32_t) ==
+                  sizeof(PersistedConfigV3),
+              "PersistedConfigV3 must have checksum as its final field");
 
 uint32_t checksum(const uint8_t *bytes, size_t length) {
   uint32_t value = 0xFFFFFFFFU;
@@ -58,16 +84,37 @@ void setError(char *error, size_t capacity, const char *message) {
   snprintf(error, capacity, "%s", message);
 }
 
+template <typename Persisted>
+void copyCommonConfig(WiFiConfig &config, const Persisted &stored) {
+  config.enabled = stored.enabled != 0;
+  memcpy(config.ssid, stored.ssid, sizeof(config.ssid));
+  memcpy(config.password, stored.password, sizeof(config.password));
+  memcpy(config.authCookie, stored.authCookie, sizeof(config.authCookie));
+  memcpy(config.workspace, stored.workspace, sizeof(config.workspace));
+  memcpy(config.queryId, stored.queryId, sizeof(config.queryId));
+  config.ssid[sizeof(config.ssid) - 1] = '\0';
+  config.password[sizeof(config.password) - 1] = '\0';
+  config.authCookie[sizeof(config.authCookie) - 1] = '\0';
+  config.workspace[sizeof(config.workspace) - 1] = '\0';
+  config.queryId[sizeof(config.queryId) - 1] = '\0';
+  config.pollIntervalSec = stored.pollIntervalSec;
+}
+
 } // namespace
 
 void reset(WiFiConfig &config) {
   config = WiFiConfig{};
   config.pollIntervalSec = kDefaultPollIntervalSec;
+  config.backlightTimeoutSec = kDefaultBacklightTimeoutSec;
 }
 
 bool validate(const WiFiConfig &config, char *error, size_t errorCapacity) {
   if (config.pollIntervalSec < 15 || config.pollIntervalSec > 86400) {
     setError(error, errorCapacity, "pollIntervalSec must be 15..86400");
+    return false;
+  }
+  if (!backlight_timer::isSupportedTimeout(config.backlightTimeoutSec)) {
+    setError(error, errorCapacity, "backlightTimeoutSec is unsupported");
     return false;
   }
   if (hasControlCharacter(config.ssid) ||
@@ -127,47 +174,58 @@ bool ConfigStore::load(WiFiConfig &config) {
   if (storedLength == 0) {
     return false;
   }
-  if (storedLength != sizeof(PersistedConfig)) {
-    preferences.remove(kConfigKey);
-    return false;
-  }
-  static PersistedConfig stored;
-  memset(&stored, 0, sizeof(stored));
-  if (preferences.getBytes(kConfigKey, &stored, sizeof(stored)) !=
-      sizeof(stored)) {
-    preferences.remove(kConfigKey);
-    return false;
-  }
-  const uint32_t expectedChecksum =
-      checksum(reinterpret_cast<const uint8_t *>(&stored),
-               offsetof(PersistedConfig, checksum));
-  if (stored.schemaVersion != kConfigSchemaVersion ||
-      stored.checksum != expectedChecksum) {
-    // A corrupted current record cannot be used safely. An unknown schema is
-    // left in place for a future firmware that may know how to migrate it.
-    if (stored.schemaVersion == kConfigSchemaVersion) {
+  if (storedLength == sizeof(PersistedConfigV3)) {
+    memset(&stored, 0, sizeof(stored));
+    if (preferences.getBytes(kConfigKey, &stored.v3, sizeof(stored.v3)) !=
+        sizeof(stored.v3)) {
       preferences.remove(kConfigKey);
+      return false;
     }
+    const uint32_t expectedChecksum =
+        checksum(reinterpret_cast<const uint8_t *>(&stored.v3),
+                 offsetof(PersistedConfigV3, checksum));
+    if (stored.v3.schemaVersion != kConfigSchemaVersion ||
+        stored.v3.checksum != expectedChecksum) {
+      if (stored.v3.schemaVersion == kConfigSchemaVersion) {
+        preferences.remove(kConfigKey);
+      }
+      return false;
+    }
+    copyCommonConfig(config, stored.v3);
+    config.backlightTimeoutSec = stored.v3.backlightTimeoutSec;
+  } else if (storedLength == sizeof(PersistedConfigV2)) {
+    memset(&stored, 0, sizeof(stored));
+    if (preferences.getBytes(kConfigKey, &stored.v2, sizeof(stored.v2)) !=
+        sizeof(stored.v2)) {
+      preferences.remove(kConfigKey);
+      return false;
+    }
+    const uint32_t expectedChecksum =
+        checksum(reinterpret_cast<const uint8_t *>(&stored.v2),
+                 offsetof(PersistedConfigV2, checksum));
+    if (stored.v2.schemaVersion != 2 ||
+        stored.v2.checksum != expectedChecksum) {
+      if (stored.v2.schemaVersion == 2) {
+        preferences.remove(kConfigKey);
+      }
+      return false;
+    }
+    copyCommonConfig(config, stored.v2);
+    config.backlightTimeoutSec = kDefaultBacklightTimeoutSec;
+  } else {
+    preferences.remove(kConfigKey);
     return false;
   }
-
-  config.enabled = stored.enabled != 0;
-  memcpy(config.ssid, stored.ssid, sizeof(config.ssid));
-  memcpy(config.password, stored.password, sizeof(config.password));
-  memcpy(config.authCookie, stored.authCookie, sizeof(config.authCookie));
-  memcpy(config.workspace, stored.workspace, sizeof(config.workspace));
-  memcpy(config.queryId, stored.queryId, sizeof(config.queryId));
-  config.ssid[sizeof(config.ssid) - 1] = '\0';
-  config.password[sizeof(config.password) - 1] = '\0';
-  config.authCookie[sizeof(config.authCookie) - 1] = '\0';
-  config.workspace[sizeof(config.workspace) - 1] = '\0';
-  config.queryId[sizeof(config.queryId) - 1] = '\0';
-  config.pollIntervalSec = stored.pollIntervalSec;
 
   char error[96] = {};
   if (!validate(config, error, sizeof(error))) {
     reset(config);
     return false;
+  }
+  if (storedLength == sizeof(PersistedConfigV2)) {
+    // Preserve a verified schema-2 record in RAM even if rewriting it fails;
+    // the next boot will retry the schema-3 migration without losing auth.
+    save(config, error, sizeof(error));
   }
   return config.enabled;
 }
@@ -182,22 +240,22 @@ bool ConfigStore::save(const WiFiConfig &config, char *error,
     return false;
   }
 
-  static PersistedConfig stored;
   memset(&stored, 0, sizeof(stored));
-  stored.schemaVersion = kConfigSchemaVersion;
-  stored.enabled = config.enabled ? 1 : 0;
-  memcpy(stored.ssid, config.ssid, sizeof(stored.ssid));
-  memcpy(stored.password, config.password, sizeof(stored.password));
-  memcpy(stored.authCookie, config.authCookie, sizeof(stored.authCookie));
-  memcpy(stored.workspace, config.workspace, sizeof(stored.workspace));
-  memcpy(stored.queryId, config.queryId, sizeof(stored.queryId));
-  stored.pollIntervalSec = config.pollIntervalSec;
-  stored.checksum = checksum(reinterpret_cast<const uint8_t *>(&stored),
-                             offsetof(PersistedConfig, checksum));
+  stored.v3.schemaVersion = kConfigSchemaVersion;
+  stored.v3.enabled = config.enabled ? 1 : 0;
+  memcpy(stored.v3.ssid, config.ssid, sizeof(stored.v3.ssid));
+  memcpy(stored.v3.password, config.password, sizeof(stored.v3.password));
+  memcpy(stored.v3.authCookie, config.authCookie, sizeof(stored.v3.authCookie));
+  memcpy(stored.v3.workspace, config.workspace, sizeof(stored.v3.workspace));
+  memcpy(stored.v3.queryId, config.queryId, sizeof(stored.v3.queryId));
+  stored.v3.pollIntervalSec = config.pollIntervalSec;
+  stored.v3.backlightTimeoutSec = config.backlightTimeoutSec;
+  stored.v3.checksum = checksum(reinterpret_cast<const uint8_t *>(&stored.v3),
+                                offsetof(PersistedConfigV3, checksum));
 
   const size_t written =
-      preferences.putBytes(kConfigKey, &stored, sizeof(stored));
-  if (written != sizeof(stored)) {
+      preferences.putBytes(kConfigKey, &stored.v3, sizeof(stored.v3));
+  if (written != sizeof(stored.v3)) {
     setError(error, errorCapacity, "Preferences write failed");
     return false;
   }

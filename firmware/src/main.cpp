@@ -6,14 +6,17 @@
 #include <cstdint>
 #include <cstring>
 
+#include "backlight_timer.h"
 #include "config_store.h"
 #include "display_controller.h"
 #include "network_client.h"
+#include "touch_ui.h"
 #include "usage_model.h"
 
 namespace {
 constexpr size_t kSerialLineCapacity = 8192;
 constexpr size_t kErrorCapacity = 128;
+constexpr uint32_t kTouchNetworkDeferralMs = 150;
 
 DisplayController display;
 config_store::ConfigStore configStore;
@@ -26,6 +29,7 @@ bool hasUsage = false;
 uint32_t renderCount = 0;
 uint32_t lastFreshUsageMs = 0;
 bool staleReported = false;
+uint32_t deferNetworkUntilMs = 0;
 
 void setErrorText(char *error, size_t capacity, const char *message) {
   if (error != nullptr && capacity > 0) {
@@ -179,10 +183,49 @@ bool parseConfig(JsonObjectConst root, config_store::WiFiConfig &config,
     parsed.pollIntervalSec = static_cast<uint32_t>(interval);
   }
 
+  if (!root["backlightTimeoutSec"].isNull()) {
+    uint64_t timeout = 0;
+    if (!readInteger(root["backlightTimeoutSec"], timeout) ||
+        timeout > UINT32_MAX) {
+      setErrorText(error, errorCapacity, "backlightTimeoutSec is invalid");
+      return false;
+    }
+    parsed.backlightTimeoutSec = static_cast<uint32_t>(timeout);
+  }
+
   if (!config_store::validate(parsed, error, errorCapacity)) {
     return false;
   }
   config = parsed;
+  return true;
+}
+
+bool isDue(uint32_t nowMs, uint32_t targetMs) {
+  return static_cast<int32_t>(nowMs - targetMs) >= 0;
+}
+
+bool readRequestId(JsonObjectConst root, const char *&requestId, char *error,
+                   size_t errorCapacity, bool required = false) {
+  requestId = nullptr;
+  if (root["requestId"].isNull()) {
+    if (!required) {
+      return true;
+    }
+    setErrorText(error, errorCapacity, "requestId is required");
+    return false;
+  }
+  if (!root["requestId"].is<const char *>()) {
+    setErrorText(error, errorCapacity,
+                 "requestId must be a hexadecimal string");
+    return false;
+  }
+  requestId = root["requestId"].as<const char *>();
+  if (requestId == nullptr || strlen(requestId) != 16 ||
+      strspn(requestId, "0123456789abcdef") != 16) {
+    setErrorText(error, errorCapacity,
+                 "requestId must contain 16 hexadecimal characters");
+    return false;
+  }
   return true;
 }
 
@@ -192,6 +235,31 @@ void addPeriod(JsonObject object, const usage_model::PeriodUsage &period) {
   object["percent"] = period.percent;
   if (period.resetInSec >= 0) {
     object["resetInSec"] = period.resetInSec;
+  }
+}
+
+void addBacklightState(JsonDocument &document, bool includeRemaining) {
+  document["backlightOn"] = display.backlightOn();
+  document["backlightTimeoutSec"] = display.backlightTimeoutSec();
+  if (includeRemaining) {
+    document["backlightRemainingMs"] = display.backlightRemainingMs();
+  }
+  document["backlightGpio"] = display.backlightGpioLevel();
+}
+
+void sendBacklightEvent() {
+  JsonDocument document;
+  document["version"] = usage_model::kProtocolVersion;
+  document["type"] = "backlight";
+  document["backlightOn"] = display.backlightOn();
+  document["backlightTimeoutSec"] = display.backlightTimeoutSec();
+  serializeJson(document, Serial);
+  Serial.println();
+}
+
+void sendBacklightEventIfChanged() {
+  if (display.consumeBacklightStateChanged()) {
+    sendBacklightEvent();
   }
 }
 
@@ -243,8 +311,35 @@ void sendConfigAck(const char *requestId) {
     document["requestId"] = requestId;
   document["wifiEnabled"] = wifiConfig.enabled;
   document["pollIntervalSec"] = wifiConfig.pollIntervalSec;
+  addBacklightState(document, false);
   document["freeHeap"] = ESP.getFreeHeap();
   document["minFreeHeap"] = ESP.getMinFreeHeap();
+  serializeJson(document, Serial);
+  Serial.println();
+}
+
+void sendDisplayAck(const char *requestId) {
+  JsonDocument document;
+  document["version"] = usage_model::kProtocolVersion;
+  document["type"] = "ack";
+  document["accepted"] = "display";
+  if (requestId != nullptr) {
+    document["requestId"] = requestId;
+  }
+  addBacklightState(document, false);
+  serializeJson(document, Serial);
+  Serial.println();
+}
+
+void sendWakeAck(const char *requestId) {
+  JsonDocument document;
+  document["version"] = usage_model::kProtocolVersion;
+  document["type"] = "ack";
+  document["accepted"] = "wake";
+  if (requestId != nullptr) {
+    document["requestId"] = requestId;
+  }
+  addBacklightState(document, false);
   serializeJson(document, Serial);
   Serial.println();
 }
@@ -263,8 +358,128 @@ void sendPingAck() {
   document["hasUsage"] = hasUsage;
   document["renderCount"] = renderCount;
   document["wifiEnabled"] = wifiConfig.enabled;
+  addBacklightState(document, true);
   serializeJson(document, Serial);
   Serial.println();
+}
+
+void sendReady() {
+  JsonDocument document;
+  document["version"] = usage_model::kProtocolVersion;
+  document["type"] = "ready";
+  document["firmware"] = "opencode-go-lcd";
+  document["setupSchema"] = config_store::kConfigSchemaVersion;
+  addBacklightState(document, true);
+  serializeJson(document, Serial);
+  Serial.println();
+}
+
+bool applyBacklightTimeout(uint32_t timeoutSec, char *error,
+                           size_t errorCapacity) {
+  if (!backlight_timer::isSupportedTimeout(timeoutSec)) {
+    setErrorText(error, errorCapacity, "backlightTimeoutSec is unsupported");
+    return false;
+  }
+  const uint32_t previousTimeout = wifiConfig.backlightTimeoutSec;
+  wifiConfig.backlightTimeoutSec = timeoutSec;
+  if (!configStore.save(wifiConfig, error, errorCapacity)) {
+    wifiConfig.backlightTimeoutSec = previousTimeout;
+    return false;
+  }
+  if (!display.setBacklightTimeoutSec(timeoutSec)) {
+    wifiConfig.backlightTimeoutSec = previousTimeout;
+    configStore.save(wifiConfig, error, errorCapacity);
+    setErrorText(error, errorCapacity, "backlightTimeoutSec is unsupported");
+    return false;
+  }
+  return true;
+}
+
+const char *touchEventName(TouchEventKind kind) {
+  switch (kind) {
+  case TouchEventKind::kWakeOnly:
+    return "wake";
+  case TouchEventKind::kTap:
+    return "tap";
+  case TouchEventKind::kUnreadable:
+    return "unreadable";
+  }
+  return "unreadable";
+}
+
+const char *touchActionName(touch_ui::ActionKind kind) {
+  switch (kind) {
+  case touch_ui::ActionKind::kUsageTab:
+    return "usage";
+  case touch_ui::ActionKind::kDisplayTab:
+    return "display";
+  case touch_ui::ActionKind::kTimeout:
+    return "timeout";
+  case touch_ui::ActionKind::kNone:
+    return "none";
+  }
+  return "none";
+}
+
+void sendTouchDiagnostic(const TouchEvent &event) {
+  JsonDocument document;
+  document["version"] = usage_model::kProtocolVersion;
+  document["type"] = "touch";
+  document["event"] = touchEventName(event.kind);
+  if (event.hasCoordinates) {
+    document["rawX"] = event.point.rawX;
+    document["rawY"] = event.point.rawY;
+    document["x"] = event.point.x;
+    document["y"] = event.point.y;
+    document["action"] = touchActionName(event.action.kind);
+    if (event.action.kind == touch_ui::ActionKind::kTimeout) {
+      document["backlightTimeoutSec"] = event.action.timeoutSec;
+    }
+  }
+  serializeJson(document, Serial);
+  Serial.println();
+}
+
+bool processTouch() {
+  TouchEvent event;
+  if (!display.pollTouch(event)) {
+    return false;
+  }
+  sendTouchDiagnostic(event);
+  if (event.kind != TouchEventKind::kTap) {
+    return true;
+  }
+
+  switch (event.action.kind) {
+  case touch_ui::ActionKind::kUsageTab:
+    display.showUsageTab();
+    if (hasUsage) {
+      display.renderSnapshot(latestUsage);
+    } else {
+      display.renderNoData("Set up WiFi on your PC");
+    }
+    break;
+  case touch_ui::ActionKind::kDisplayTab:
+    display.showDisplayTab(wifiConfig.backlightTimeoutSec);
+    break;
+  case touch_ui::ActionKind::kTimeout: {
+    char error[kErrorCapacity] = {};
+    if (applyBacklightTimeout(event.action.timeoutSec, error, sizeof(error))) {
+      display.showDisplayTab(wifiConfig.backlightTimeoutSec);
+      display.showStatus("Screen timeout saved", ILI9341_GREEN);
+      // There is no serial requestId for an on-device tap, but the same ACK
+      // lets a connected setup UI synchronize the persisted selection.
+      sendDisplayAck(nullptr);
+    } else {
+      display.showStatus(error, ILI9341_RED);
+      sendError(error);
+    }
+    break;
+  }
+  case touch_ui::ActionKind::kNone:
+    break;
+  }
+  return true;
 }
 
 bool processFrame(const char *payload, const char *source) {
@@ -314,7 +529,7 @@ bool processFrame(const char *payload, const char *source) {
     ++renderCount;
     display.renderSnapshot(latestUsage);
     if (staleReported)
-      display.showStatus("STALE - check host connection", ILI9341_ORANGE);
+      display.showStatus("STALE - check WiFi / login", ILI9341_ORANGE);
     sendUsageAck(latestUsage, source);
     return true;
   }
@@ -332,17 +547,9 @@ bool processFrame(const char *payload, const char *source) {
 
   if (strcmp(type, "config") == 0) {
     const char *requestId = nullptr;
-    if (!root["requestId"].isNull()) {
-      if (!root["requestId"].is<const char *>()) {
-        sendError("requestId must be a hexadecimal string");
-        return false;
-      }
-      requestId = root["requestId"].as<const char *>();
-      if (strlen(requestId) != 16 ||
-          strspn(requestId, "0123456789abcdef") != 16) {
-        sendError("requestId must contain 16 hexadecimal characters");
-        return false;
-      }
+    if (!readRequestId(root, requestId, error, sizeof(error))) {
+      sendError(error);
+      return false;
     }
     static config_store::WiFiConfig parsed;
     if (!parseConfig(root, parsed, error, sizeof(error))) {
@@ -355,10 +562,50 @@ bool processFrame(const char *payload, const char *source) {
     }
     wifiConfig = parsed;
     networkClient.setConfig(wifiConfig);
+    display.setBacklightTimeoutSec(wifiConfig.backlightTimeoutSec);
+    if (display.activeTab() == touch_ui::Tab::kDisplay) {
+      display.showDisplayTab(wifiConfig.backlightTimeoutSec);
+    }
     display.showStatus(wifiConfig.enabled ? "WiFi config saved"
                                           : "Setup cleared - use PC",
                        ILI9341_GREEN);
     sendConfigAck(requestId);
+    return true;
+  }
+
+  if (strcmp(type, "display") == 0) {
+    const char *requestId = nullptr;
+    if (!readRequestId(root, requestId, error, sizeof(error), true)) {
+      sendError(error);
+      return false;
+    }
+    uint64_t timeout = 0;
+    if (!readInteger(root["backlightTimeoutSec"], timeout) ||
+        timeout > UINT32_MAX ||
+        !backlight_timer::isSupportedTimeout(static_cast<uint32_t>(timeout))) {
+      sendError("backlightTimeoutSec is unsupported");
+      return false;
+    }
+    if (!applyBacklightTimeout(static_cast<uint32_t>(timeout), error,
+                               sizeof(error))) {
+      sendError(error);
+      return false;
+    }
+    if (display.activeTab() == touch_ui::Tab::kDisplay) {
+      display.showDisplayTab(wifiConfig.backlightTimeoutSec);
+    }
+    sendDisplayAck(requestId);
+    return true;
+  }
+
+  if (strcmp(type, "wake") == 0) {
+    const char *requestId = nullptr;
+    if (!readRequestId(root, requestId, error, sizeof(error))) {
+      sendError(error);
+      return false;
+    }
+    display.wakeBacklight();
+    sendWakeAck(requestId);
     return true;
   }
 
@@ -431,25 +678,37 @@ void setup() {
 
   config_store::reset(wifiConfig);
   configStore.begin();
-  if (configStore.load(wifiConfig)) {
+  const bool wifiConfigured = configStore.load(wifiConfig);
+  // load() intentionally returns false for a valid disabled Wi-Fi record.
+  // Its display timeout is still persisted and must survive that restart.
+  display.setBacklightTimeoutSec(wifiConfig.backlightTimeoutSec);
+  if (wifiConfigured) {
     networkClient.setConfig(wifiConfig);
     display.showStatus("WiFi config loaded", ILI9341_YELLOW);
   } else {
     display.showStatus("Set up WiFi on your PC", ILI9341_YELLOW);
   }
-  Serial.println("{\"version\":1,\"type\":\"ready\",\"firmware\":\"opencode-go-"
-                 "lcd\",\"setupSchema\":2}");
+  sendReady();
 }
 
 void loop() {
   pollSerial();
-  networkClient.tick(millis(), onNetworkPayload, onNetworkStatus, nullptr);
+  const bool touchHandled = processTouch();
+  if (touchHandled) {
+    deferNetworkUntilMs = millis() + kTouchNetworkDeferralMs;
+  }
+  sendBacklightEventIfChanged();
+  const uint32_t nowMs = millis();
+  if (!display.hasTouchPending() && isDue(nowMs, deferNetworkUntilMs)) {
+    networkClient.tick(nowMs, onNetworkPayload, onNetworkStatus, nullptr);
+  }
+  sendBacklightEventIfChanged();
   const uint32_t pollInterval =
       wifiConfig.enabled ? wifiConfig.pollIntervalSec : 60;
   if (hasUsage && !staleReported &&
       usage_model::isStale(millis() - lastFreshUsageMs, pollInterval)) {
     staleReported = true;
-    display.showStatus("STALE - check host connection", ILI9341_ORANGE);
+    display.showStatus("STALE - check WiFi / login", ILI9341_ORANGE);
     sendStatus("Usage is stale");
   }
   delay(2);
