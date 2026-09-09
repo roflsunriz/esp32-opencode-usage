@@ -33,7 +33,7 @@ Node.js 24は開発用fake fixtureテストだけで使います。製品のホ�
 | [Adafruit ILI9341](https://github.com/adafruit/Adafruit_ILI9341)            | `1.6.3`                                 | ESP32-2432S028RのILI9341 LCDをSPIで駆動する。                                 | MIT                  |
 | [ArduinoJson](https://github.com/bblanchon/ArduinoJson)                     | `7.4.3`                                 | USB設定フレーム、使用量フレーム、ACKを型とサイズを確認しながら扱う。          | MIT                  |
 | [esptool](https://github.com/espressif/esptool)                             | `requirements-dev.txt` の `5.4.0`       | 全フラッシュの退避、SHA-256照合、書き戻し、検証に使う。                       | GPL-2.0-or-later     |
-| [Pillow](https://github.com/python-pillow/Pillow)                           | `requirements-dev.txt` の `12.2.0`      | USB診断スクリーンショットのRGBデータを検証する開発用ツール。                  | HPND / PILライセンス |
+| [Pillow](https://github.com/python-pillow/Pillow)                           | `requirements-dev.txt` の `12.3.0`      | USB診断スクリーンショットのRGBデータを検証する開発用ツール。                  | HPND / PILライセンス |
 
 PlatformIOの解決結果は `platformio.ini` の固定値を基準に更新します。ESP32のHTTPS、Google Trust Services CA、NTPの実装が変更された場合は、CA期限、時刻未同期、再起動後の直接取得を実機で確認してから案内を更新します。
 
