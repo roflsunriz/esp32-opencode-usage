@@ -1,12 +1,14 @@
 #include "display_controller.h"
 
-#include "banded_frame.h"
 #include "board_pins.h"
 
 #include <soc/gpio_struct.h>
+#include <Preferences.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 
 namespace {
 constexpr uint16_t kBackground = 0x1082;
@@ -20,76 +22,21 @@ constexpr int16_t kFooterTop = touch_ui::kFooterTop;
 constexpr int16_t kRowHeight = 62;
 constexpr int16_t kFirstRowTop = touch_ui::kTabHeight + 2;
 constexpr uint64_t kBacklightTimerPeriodUs = 10000;
-// Adafruit's TSC2046 driver uses a conservative 2 MHz SPI default. It is
-// below the XPT2046 timing limit and avoids board-to-board read noise.
 constexpr uint32_t kTouchSpiFrequencyHz = 2000000;
 constexpr uint8_t kEnablePenIrqCommand = 0x90;
-constexpr uint8_t kReadXCommand = 0xD0;
-constexpr uint8_t kReadYCommand = 0x90;
-constexpr size_t kTouchSampleCount = 5;
-
-// Adafruit_GFX normally owns a full canvas. This keeps its 320x240 logical
-// coordinate system, while storing only the currently transferred 16-line
-// band. Text and rounded primitives are clipped at the final pixel write, so
-// each SPI transfer contains a complete image with no erase-before-draw pass.
-class BandCanvas16 final : public Adafruit_GFX {
-public:
-  BandCanvas16(uint16_t *pixels, int16_t width, int16_t height,
-               int16_t bandHeight)
-      : Adafruit_GFX(width, height), pixels_(pixels), bandHeight_(bandHeight) {
-    setTextWrap(false);
-  }
-
-  void setBandTop(int16_t top) { bandTop_ = top; }
-
-  void drawPixel(int16_t x, int16_t y, uint16_t color) override {
-    if (x < 0 || x >= _width || y < bandTop_ ||
-        y >= bandTop_ + bandHeight_) {
-      return;
-    }
-    pixels_[static_cast<size_t>(y - bandTop_) * _width + x] = color;
-  }
-
-  void drawFastVLine(int16_t x, int16_t y, int16_t height,
-                     uint16_t color) override {
-    fillRect(x, y, 1, height, color);
-  }
-
-  void drawFastHLine(int16_t x, int16_t y, int16_t width,
-                     uint16_t color) override {
-    fillRect(x, y, width, 1, color);
-  }
-
-  void fillRect(int16_t x, int16_t y, int16_t width, int16_t height,
-                uint16_t color) override {
-    const banded_frame::Rect area =
-        banded_frame::clipToBand(x, y, width, height, _width, _height,
-                                 bandTop_, bandHeight_);
-    if (!area.visible) {
-      return;
-    }
-    for (int16_t row = 0; row < area.height; ++row) {
-      uint16_t *destination =
-          pixels_ + static_cast<size_t>(area.y - bandTop_ + row) * _width +
-          area.x;
-      for (int16_t column = 0; column < area.width; ++column) {
-        destination[column] = color;
-      }
-    }
-  }
-
-  void fillScreen(uint16_t color) override {
-    for (size_t index = 0;
-         index < static_cast<size_t>(_width) * bandHeight_; ++index) {
-      pixels_[index] = color;
-    }
-  }
-
-private:
-  uint16_t *pixels_ = nullptr;
-  int16_t bandTop_ = 0;
-  int16_t bandHeight_ = 0;
+constexpr int16_t kCapturePressure = 12;
+constexpr uint32_t kCalibrationVersion = 1;
+struct StoredCalibration {
+  uint32_t version;
+  int16_t values[5];
+  uint16_t check;
 };
+static_assert(sizeof(StoredCalibration) == 16, "touch calibration record size");
+uint16_t calibrationCheck(const StoredCalibration& record) {
+  uint16_t result = 0xA53C;
+  for (const int16_t value : record.values) result ^= static_cast<uint16_t>(value);
+  return result;
+}
 
 uint16_t colorForPercent(double percent) {
   if (percent >= 90.0) {
@@ -120,18 +67,20 @@ bool sameSnapshot(const usage_model::UsageSnapshot &left,
 } // namespace
 
 DisplayController::DisplayController()
-    : spi_(VSPI), touchSpi_(HSPI),
-      tft_(&spi_, board_pins::tft_dc, board_pins::tft_cs, board_pins::tft_rst) {
+    : touchSpi_(VSPI), tft_(), canvas_(&tft_),
+      touch_(board_pins::touch_cs, board_pins::touch_irq, 120) {
 }
 
 void DisplayController::begin(bool flipped) {
   pinMode(board_pins::tft_backlight, OUTPUT);
   digitalWrite(board_pins::tft_backlight, HIGH);
-  spi_.begin(board_pins::tft_sclk, board_pins::tft_miso, board_pins::tft_mosi,
-             board_pins::tft_cs);
-  tft_.begin(40000000);
+  tft_.init();
   setScreenFlipped(flipped);
   tft_.setTextWrap(false);
+  canvas_.setColorDepth(8);
+  canvasReady_ = canvas_.createSprite(touch_ui::kDisplayWidth,
+                                      touch_ui::kDisplayHeight) != nullptr;
+  canvas_.setTextWrap(false);
   presentScreen();
 
   backlight_.start(backlight_timer::kDefaultTimeoutSec, nowMs());
@@ -154,6 +103,8 @@ void DisplayController::begin(bool flipped) {
     showStatus("Backlight timer failed", ILI9341_RED);
   }
   armTouchInterrupt();
+  loadCalibration();
+  touch_.setPressureThreshold(touchCalibration_.pressure);
 }
 
 uint32_t DisplayController::nowMs() const {
@@ -163,6 +114,7 @@ uint32_t DisplayController::nowMs() const {
 void DisplayController::setScreenFlipped(bool flipped) {
   screenFlipped_ = flipped;
   tft_.setRotation(flipped ? 3 : 1);
+  bandDiff_.invalidate();
 }
 
 bool DisplayController::consumeBootClick() {
@@ -173,6 +125,14 @@ bool DisplayController::consumeBootClick() {
   }
   portEXIT_CRITICAL(&backlightMux_);
   return clicked;
+}
+
+bool DisplayController::consumeBootCalibration() {
+  portENTER_CRITICAL(&backlightMux_);
+  const bool requested = pendingBootCalibrations_ != 0;
+  if (requested) --pendingBootCalibrations_;
+  portEXIT_CRITICAL(&backlightMux_);
+  return requested;
 }
 
 void DisplayController::redraw(const usage_model::UsageSnapshot *snapshot,
@@ -207,7 +167,8 @@ void DisplayController::handleBacklightTimer() {
   portENTER_CRITICAL(&backlightMux_);
   if (bootButton_.update(digitalRead(board_pins::boot_button) == LOW,
                          currentMs)) {
-    ++pendingBootClicks_;
+    if (bootButton_.lastDurationMs() >= 1500) ++pendingBootCalibrations_;
+    else ++pendingBootClicks_;
     if (backlight_.wake(currentMs)) {
       setBacklightPinLocked(true);
       backlightStateChanged_ = true;
@@ -266,9 +227,9 @@ void DisplayController::armTouchInterrupt() {
   digitalWrite(board_pins::touch_cs, HIGH);
   touchSpi_.endTransaction();
 
-  pinMode(board_pins::touch_irq, INPUT);
-  attachInterruptArg(board_pins::touch_irq, &DisplayController::touchInterrupt,
-                     this, FALLING);
+  touch_.setInterruptCallback(&DisplayController::touchInterrupt, this);
+  touch_.begin(touchSpi_);
+  touch_.setRotation(1);
 }
 
 bool DisplayController::hasTouchPending() {
@@ -278,37 +239,146 @@ bool DisplayController::hasTouchPending() {
   return pending;
 }
 
-uint16_t DisplayController::readTouchCoordinate(uint8_t command) {
-  touchSpi_.transfer(command);
-  const uint16_t upper = touchSpi_.transfer(0);
-  const uint16_t lower = touchSpi_.transfer(0);
-  return static_cast<uint16_t>(((upper << 8) | lower) >> 3);
+bool DisplayController::readTouchPoint(touch_ui::Point &point) {
+  if (!touch_.tirqTouched()) return false;
+  int32_t sumX = 0, sumY = 0;
+  for (int i = 0; i < 3; ++i) {
+    const SensitiveTouchPoint sample = touch_.getPoint();
+    if (sample.z < touchCalibration_.pressure ||
+        !touch_ui::isPlausibleRaw(sample.x, sample.y)) return false;
+    if (i && (abs(sample.x - sumX / i) > 220 ||
+              abs(sample.y - sumY / i) > 220)) return false;
+    sumX += sample.x; sumY += sample.y;
+    delay(5);
+  }
+  const uint16_t rawX = static_cast<uint16_t>(sumX / 3);
+  const uint16_t rawY = static_cast<uint16_t>(sumY / 3);
+  point = touchCalibration_.configured
+      ? touch_ui::mapPointCalibrated(rawX, rawY, screenFlipped_,
+                                    touchCalibration_.left, touchCalibration_.right,
+                                    touchCalibration_.top, touchCalibration_.bottom)
+      : touch_ui::mapPoint(rawX, rawY, screenFlipped_);
+  return true;
 }
 
-bool DisplayController::readTouchPoint(touch_ui::Point &point) {
-  if (digitalRead(board_pins::touch_irq) != LOW) {
-    return false;
+void DisplayController::loadCalibration() {
+  Preferences prefs;
+  if (!prefs.begin("opencode-touch", true)) return;
+  StoredCalibration stored = {};
+  if (prefs.getBytesLength("calib") == sizeof(stored) &&
+      prefs.getBytes("calib", &stored, sizeof(stored)) == sizeof(stored) &&
+      stored.version == kCalibrationVersion &&
+      stored.check == calibrationCheck(stored)) {
+    TouchCalibration candidate;
+    candidate.left = stored.values[0];
+    candidate.right = stored.values[1];
+    candidate.top = stored.values[2];
+    candidate.bottom = stored.values[3];
+    candidate.pressure = stored.values[4];
+    candidate.configured = true;
+    if (abs(candidate.right - candidate.left) > 1000 &&
+        abs(candidate.bottom - candidate.top) > 1000 &&
+        candidate.pressure >= kCapturePressure && candidate.pressure <= 120)
+      touchCalibration_ = candidate;
   }
+  prefs.end();
+}
 
-  uint16_t rawX[kTouchSampleCount] = {};
-  uint16_t rawY[kTouchSampleCount] = {};
-  touchSpi_.beginTransaction(
-      SPISettings(kTouchSpiFrequencyHz, MSBFIRST, SPI_MODE0));
-  digitalWrite(board_pins::touch_cs, LOW);
-  for (size_t index = 0; index < kTouchSampleCount; ++index) {
-    rawX[index] = readTouchCoordinate(kReadXCommand);
-    rawY[index] = readTouchCoordinate(kReadYCommand);
-  }
-  digitalWrite(board_pins::touch_cs, HIGH);
-  touchSpi_.endTransaction();
+bool DisplayController::saveCalibration() {
+  Preferences prefs;
+  if (!prefs.begin("opencode-touch", false)) return false;
+  StoredCalibration stored = {kCalibrationVersion,
+      {touchCalibration_.left, touchCalibration_.right, touchCalibration_.top,
+       touchCalibration_.bottom, touchCalibration_.pressure}, 0};
+  stored.check = calibrationCheck(stored);
+  const bool saved = prefs.putBytes("calib", &stored, sizeof(stored)) == sizeof(stored);
+  prefs.end();
+  return saved;
+}
 
-  const uint16_t medianX = touch_ui::median5(rawX);
-  const uint16_t medianY = touch_ui::median5(rawY);
-  if (!touch_ui::isPlausibleRaw(medianX, medianY)) {
-    return false;
+bool DisplayController::captureCalibrationPoint(int16_t &rawX, int16_t &rawY,
+                                                 int16_t &pressure) {
+  const uint32_t start = nowMs();
+  while (static_cast<uint32_t>(nowMs() - start) < 15000) {
+    wakeBacklight();
+    if (!touch_.tirqTouched()) { delay(10); continue; }
+    int32_t sumX = 0, sumY = 0;
+    int16_t count = 0, weakest = 32767;
+    while (touch_.tirqTouched() && count < 12 &&
+           static_cast<uint32_t>(nowMs() - start) < 15000) {
+      wakeBacklight();
+      const SensitiveTouchPoint point = touch_.getPoint();
+      if (point.z >= kCapturePressure &&
+          touch_ui::isPlausibleRaw(point.x, point.y)) {
+        sumX += point.x; sumY += point.y;
+        weakest = std::min(weakest, point.z);
+        ++count;
+      }
+      delay(12);
+    }
+    while (touch_.tirqTouched() &&
+           static_cast<uint32_t>(nowMs() - start) < 15000) {
+      wakeBacklight();
+      touch_.getPoint(); delay(10);
+    }
+    if (count >= 4) {
+      rawX = static_cast<int16_t>(sumX / count);
+      rawY = static_cast<int16_t>(sumY / count);
+      pressure = weakest;
+      return true;
+    }
   }
-  point = touch_ui::mapPoint(medianX, medianY, screenFlipped_);
-  return true;
+  return false;
+}
+
+void DisplayController::calibrateTouch() {
+  const bool flipped = screenFlipped_;
+  tft_.setRotation(1);
+  touch_.setPressureThreshold(kCapturePressure);
+  auto step = [this](const char* label, int x, int y) {
+    tft_.fillScreen(TFT_BLACK);
+    tft_.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft_.drawString(label, 8, 8, 2);
+    tft_.drawString("Press cross with stylus", 8, 40, 2);
+    tft_.fillRect(x - 10, y, 21, 1, TFT_YELLOW);
+    tft_.fillRect(x, y - 10, 1, 21, TFT_YELLOW);
+  };
+  int16_t firstX = 0, firstY = 0, secondX = 0, secondY = 0;
+  int16_t firstPressure = 0, secondPressure = 0;
+  step("TOUCH 1/2", 24, 24);
+  const bool first = captureCalibrationPoint(firstX, firstY, firstPressure);
+  if (first) step("TOUCH 2/2", 295, 215);
+  const bool second = first && captureCalibrationPoint(secondX, secondY,
+                                                       secondPressure);
+  if (second && abs(secondY - firstY) > 1000 &&
+      abs(secondX - firstX) > 1000) {
+    const TouchCalibration previous = touchCalibration_;
+    touchCalibration_.left = firstY;
+    touchCalibration_.right = secondY;
+    touchCalibration_.top = firstX;
+    touchCalibration_.bottom = secondX;
+    touchCalibration_.pressure = touch_ui::pressureThresholdFor(
+        std::min(firstPressure, secondPressure));
+    touchCalibration_.configured = true;
+    if (!saveCalibration()) {
+      touchCalibration_ = previous;
+      tft_.fillScreen(TFT_BLACK);
+      tft_.drawString("Calibration save failed", 8, 70, 2);
+      delay(1800);
+    }
+  } else {
+    tft_.fillScreen(TFT_BLACK);
+    tft_.drawString(first ? "Calibration invalid" : "No touch detected", 8, 70, 2);
+    delay(1800);
+  }
+  touch_.setPressureThreshold(touchCalibration_.pressure);
+  tft_.setRotation(flipped ? 3 : 1);
+  bandDiff_.invalidate();
+  wakeBacklight();
+  portENTER_CRITICAL(&backlightMux_);
+  touchReadPending_ = touchWakePending_ = touchWakeOnly_ = false;
+  portEXIT_CRITICAL(&backlightMux_);
+  touchLatch_ = touch_ui::ReleaseLatch();
 }
 
 bool DisplayController::pollTouch(TouchEvent &event) {
@@ -401,41 +471,30 @@ int DisplayController::backlightGpioLevel() const {
 }
 
 void DisplayController::presentScreen() {
-  tft_.startWrite();
-  for (uint16_t top = 0; top < touch_ui::kDisplayHeight;
-       top += kFrameBandHeight) {
-    BandCanvas16 canvas(frameBand_, touch_ui::kDisplayWidth,
-                        touch_ui::kDisplayHeight, kFrameBandHeight);
-    canvas.setBandTop(top);
-    drawScreen(canvas);
-    tft_.setAddrWindow(0, top, touch_ui::kDisplayWidth, kFrameBandHeight);
-    tft_.writePixels(frameBand_,
-                     touch_ui::kDisplayWidth * kFrameBandHeight);
-    yield();
+  TFT_eSPI &surface = canvasReady_ ? static_cast<TFT_eSPI &>(canvas_) : tft_;
+  surface.setTextFont(1);
+  drawScreen(surface);
+  if (canvasReady_) {
+    const uint16_t changed = bandDiff_.update(
+        static_cast<const uint8_t*>(canvas_.getPointer()));
+    if (!display_diff::eachRun(changed, [this](size_t top, size_t height) {
+          return canvas_.pushSprite(0, static_cast<int32_t>(top), 0,
+                                    static_cast<int32_t>(top),
+                                    static_cast<int32_t>(display_diff::kWidth),
+                                    static_cast<int32_t>(height));
+        })) {
+      canvas_.pushSprite(0, 0);
+      bandDiff_.invalidate();
+    }
   }
-  tft_.endWrite();
   hasPresentedScreen_ = true;
 }
 
 void DisplayController::presentStatusBand() {
-  const uint16_t top =
-      (static_cast<uint16_t>(kFooterTop) / kFrameBandHeight) * kFrameBandHeight;
-  presentBand(top);
+  presentScreen();
 }
 
-void DisplayController::presentBand(uint16_t top) {
-  BandCanvas16 canvas(frameBand_, touch_ui::kDisplayWidth,
-                      touch_ui::kDisplayHeight, kFrameBandHeight);
-  canvas.setBandTop(top);
-  drawScreen(canvas);
-  tft_.startWrite();
-  tft_.setAddrWindow(0, top, touch_ui::kDisplayWidth, kFrameBandHeight);
-  tft_.writePixels(frameBand_, touch_ui::kDisplayWidth * kFrameBandHeight);
-  tft_.endWrite();
-  hasPresentedScreen_ = true;
-}
-
-void DisplayController::drawScreen(Adafruit_GFX &surface) {
+void DisplayController::drawScreen(TFT_eSPI &surface) {
   surface.fillScreen(kBackground);
   drawHeader(surface);
   if (activeTab_ == touch_ui::Tab::kDisplay) {
@@ -446,7 +505,7 @@ void DisplayController::drawScreen(Adafruit_GFX &surface) {
   drawStatus(surface);
 }
 
-void DisplayController::drawHeader(Adafruit_GFX &surface) {
+void DisplayController::drawHeader(TFT_eSPI &surface) {
   const bool usageActive = activeTab_ == touch_ui::Tab::kUsage;
   surface.fillRect(0, 0, touch_ui::kDisplayWidth, touch_ui::kTabHeight,
                    ILI9341_BLACK);
@@ -468,7 +527,7 @@ void DisplayController::drawHeader(Adafruit_GFX &surface) {
   surface.print("Display");
 }
 
-void DisplayController::drawDisplaySettings(Adafruit_GFX &surface,
+void DisplayController::drawDisplaySettings(TFT_eSPI &surface,
                                             uint32_t selectedTimeoutSec) {
   for (uint16_t row = 0; row < touch_ui::kGridRows; ++row) {
     for (uint16_t column = 0; column < touch_ui::kGridColumns; ++column) {
@@ -501,7 +560,7 @@ void DisplayController::drawDisplaySettings(Adafruit_GFX &surface,
   surface.print(touch_ui::timeoutLabel(selectedTimeoutSec));
 }
 
-void DisplayController::drawUsage(Adafruit_GFX &surface) {
+void DisplayController::drawUsage(TFT_eSPI &surface) {
   const usage_model::PeriodUsage empty;
   const usage_model::UsageSnapshot *snapshot =
       hasDisplayedSnapshot_ ? &displayedSnapshot_ : nullptr;
@@ -513,14 +572,16 @@ void DisplayController::drawUsage(Adafruit_GFX &surface) {
              kFirstRowTop + kRowHeight * 2);
 }
 
-void DisplayController::drawStatus(Adafruit_GFX &surface) {
+void DisplayController::drawStatus(TFT_eSPI &surface) {
   surface.fillRect(0, kFooterTop, touch_ui::kDisplayWidth,
                    touch_ui::kDisplayHeight - kFooterTop, kBackground);
-  drawTextClipped(surface, status_, 5, kFooterTop + 2, 1, statusColor_,
+  drawTextClipped(surface, canvasReady_ ? status_ : "Display memory low - reboot",
+                  5, kFooterTop + 2, 1,
+                  canvasReady_ ? statusColor_ : ILI9341_RED,
                   touch_ui::kDisplayWidth - 10);
 }
 
-void DisplayController::drawTextClipped(Adafruit_GFX &surface,
+void DisplayController::drawTextClipped(TFT_eSPI &surface,
                                         const char *message, int16_t x,
                                         int16_t y, uint8_t textSize,
                                         uint16_t color, uint16_t maxWidth) {
@@ -546,7 +607,7 @@ void DisplayController::drawTextClipped(Adafruit_GFX &surface,
   surface.print(clipped);
 }
 
-void DisplayController::drawReset(Adafruit_GFX &surface, int16_t x, int16_t y,
+void DisplayController::drawReset(TFT_eSPI &surface, int16_t x, int16_t y,
                                   int64_t resetInSec) {
   char resetText[32] = {};
   if (resetInSec < 0) {
@@ -563,7 +624,7 @@ void DisplayController::drawReset(Adafruit_GFX &surface, int16_t x, int16_t y,
   drawTextClipped(surface, resetText, x, y, 1, ILI9341_LIGHTGREY, 130);
 }
 
-void DisplayController::drawPeriod(Adafruit_GFX &surface, const char *label,
+void DisplayController::drawPeriod(TFT_eSPI &surface, const char *label,
                                    const usage_model::PeriodUsage &period,
                                    int16_t top) {
   surface.fillRoundRect(2, top, touch_ui::kDisplayWidth - 4, kRowHeight - 3,
@@ -701,20 +762,12 @@ void DisplayController::capture() {
   // Read in a fixed board orientation so diagnostics show the actual flip,
   // rather than silently normalizing both rotations to an upright image.
   tft_.setRotation(1);
-  tft_.setSPISpeed(2000000);
-  tft_.startWrite();
-  tft_.setAddrWindow(0, 0, 320, 240);
-  tft_.writeCommand(ILI9341_RAMRD);
-  tft_.spiRead();
   uint8_t line[960];
   for (int y = 0; y < 240; y++) {
-    for (int x = 0; x < 960; x++)
-      line[x] = tft_.spiRead();
+    tft_.readRectRGB(0, y, 320, 1, line);
     Serial.write(line, sizeof(line));
     yield();
   }
-  tft_.endWrite();
-  tft_.setSPISpeed(40000000);
   tft_.setRotation(screenFlipped_ ? 3 : 1);
   Serial.println();
 }

@@ -125,21 +125,39 @@ inline Point mapPoint(uint16_t rawX, uint16_t rawY, bool flipped = false) {
   return point;
 }
 
-inline uint16_t median5(const uint16_t values[5]) {
-  uint16_t sorted[5] = {};
-  for (size_t index = 0; index < 5; ++index) {
-    sorted[index] = values[index];
+inline uint16_t mapAxisCalibrated(uint16_t raw, int16_t start, int16_t end,
+                                   int16_t targetStart, int16_t targetEnd,
+                                   uint16_t maximum) {
+  const int32_t span = static_cast<int32_t>(end) - start;
+  if (span > -100 && span < 100) return targetStart;
+  int32_t value = targetStart + (static_cast<int32_t>(raw) - start) *
+                                  (targetEnd - targetStart) / span;
+  if (value < 0) value = 0;
+  if (value > maximum) value = maximum;
+  return static_cast<uint16_t>(value);
+}
+
+inline Point mapPointCalibrated(uint16_t rawX, uint16_t rawY, bool flipped,
+                                int16_t left, int16_t right,
+                                int16_t top, int16_t bottom) {
+  Point point;
+  point.rawX = rawX;
+  point.rawY = rawY;
+  // 実機で確認した軸入れ替えを保つ。保存値は通常向きの物理座標。
+  point.x = mapAxisCalibrated(rawY, left, right, 24, 295, 319);
+  point.y = mapAxisCalibrated(rawX, top, bottom, 24, 215, 239);
+  if (flipped) {
+    point.x = 319 - point.x;
+    point.y = 239 - point.y;
   }
-  for (size_t outer = 0; outer < 4; ++outer) {
-    for (size_t inner = outer + 1; inner < 5; ++inner) {
-      if (sorted[inner] < sorted[outer]) {
-        const uint16_t swap = sorted[outer];
-        sorted[outer] = sorted[inner];
-        sorted[inner] = swap;
-      }
-    }
-  }
-  return sorted[2];
+  return point;
+}
+
+inline int16_t pressureThresholdFor(int16_t weakestPressure) {
+  int16_t threshold = weakestPressure / 2;
+  if (threshold < 12) threshold = 12;
+  if (threshold > 120) threshold = 120;
+  return threshold;
 }
 
 inline Action hitTest(Tab activeTab, uint16_t x, uint16_t y) {

@@ -484,6 +484,13 @@ bool processTouch() {
 }
 
 bool processBootButton() {
+  if (display.consumeBootCalibration()) {
+    display.wakeBacklight();
+    display.calibrateTouch();
+    display.redraw(hasUsage ? &latestUsage : nullptr,
+                   wifiConfig.backlightTimeoutSec);
+    return true;
+  }
   if (!display.consumeBootClick()) {
     return false;
   }

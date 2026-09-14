@@ -16,11 +16,13 @@ void test_click_requires_stable_press_and_release_without_hold_repeat() {
   TEST_ASSERT_FALSE(button.update(false, 10001));
   TEST_ASSERT_FALSE(button.update(false, 10030));
   TEST_ASSERT_TRUE(button.update(false, 10031));
+  TEST_ASSERT_TRUE(button.lastDurationMs() >= 1500);
   TEST_ASSERT_FALSE(button.update(false, 20000));
   TEST_ASSERT_FALSE(button.update(true, 20001));
   TEST_ASSERT_FALSE(button.update(true, 20031));
   TEST_ASSERT_FALSE(button.update(false, 20040));
   TEST_ASSERT_TRUE(button.update(false, 20070));
+  TEST_ASSERT_TRUE(button.lastDurationMs() < 1500);
 }
 
 void test_bounce_does_not_click_or_repeat() {
@@ -36,6 +38,7 @@ void test_bounce_does_not_click_or_repeat() {
   TEST_ASSERT_FALSE(button.update(false, 170));
   TEST_ASSERT_FALSE(button.update(false, 199));
   TEST_ASSERT_TRUE(button.update(false, 200));
+  TEST_ASSERT_TRUE(button.lastDurationMs() < 1500);
   TEST_ASSERT_FALSE(button.update(false, 300));
 }
 

@@ -1,5 +1,7 @@
+#include <array>
 #include <unity.h>
 
+#include "display-diff.h"
 #include "touch_ui.h"
 
 void test_maps_measured_swapped_rotation_one_calibration() {
@@ -20,9 +22,48 @@ void test_maps_measured_swapped_rotation_one_calibration() {
   TEST_ASSERT_FALSE(touch_ui::isPlausibleRaw(0, 2000));
 }
 
-void test_filters_five_raw_samples_with_median() {
-  const uint16_t samples[] = {100, 101, 4000, 99, 102};
-  TEST_ASSERT_EQUAL_UINT16(101, touch_ui::median5(samples));
+void test_calibrated_axes_pressure_target_and_inversion() {
+  const auto leftTop = touch_ui::mapPointCalibrated(280, 340, false,
+                                                   340, 3860, 280, 3860);
+  TEST_ASSERT_EQUAL_UINT16(24, leftTop.x);
+  TEST_ASSERT_EQUAL_UINT16(24, leftTop.y);
+  const auto rightBottom = touch_ui::mapPointCalibrated(3860, 3860, false,
+                                                       340, 3860, 280, 3860);
+  TEST_ASSERT_EQUAL_UINT16(295, rightBottom.x);
+  TEST_ASSERT_EQUAL_UINT16(215, rightBottom.y);
+  const auto inverted = touch_ui::mapPointCalibrated(280, 340, true,
+                                                    340, 3860, 280, 3860);
+  TEST_ASSERT_EQUAL_UINT16(295, inverted.x);
+  TEST_ASSERT_EQUAL_UINT16(215, inverted.y);
+  const auto reversed = touch_ui::mapPointCalibrated(3860, 3860, false,
+                                                    3860, 340, 3860, 280);
+  TEST_ASSERT_EQUAL_UINT16(24, reversed.x);
+  TEST_ASSERT_EQUAL_UINT16(24, reversed.y);
+  TEST_ASSERT_EQUAL_INT16(12, touch_ui::pressureThresholdFor(10));
+  TEST_ASSERT_EQUAL_INT16(15, touch_ui::pressureThresholdFor(30));
+  TEST_ASSERT_EQUAL_INT16(120, touch_ui::pressureThresholdFor(600));
+}
+
+void test_only_changed_display_bands_are_transferred() {
+  std::array<uint8_t, display_diff::kWidth * display_diff::kHeight> frame{};
+  display_diff::Bands bands;
+  TEST_ASSERT_EQUAL_HEX16(0x7FFF, bands.update(frame.data()));
+  TEST_ASSERT_EQUAL_HEX16(0, bands.update(frame.data()));
+  frame[1 * display_diff::kWidth + 4] = 2;
+  TEST_ASSERT_EQUAL_HEX16(1, bands.update(frame.data()));
+  frame[228 * display_diff::kWidth + 5] = 3;
+  TEST_ASSERT_EQUAL_HEX16(1U << 14, bands.update(frame.data()));
+  bands.invalidate();
+  TEST_ASSERT_EQUAL_HEX16(0x7FFF, bands.update(frame.data()));
+  size_t runs = 0;
+  TEST_ASSERT_TRUE(display_diff::eachRun(
+      static_cast<uint16_t>((1U << 2) | (1U << 3) | (1U << 6)),
+      [&](size_t top, size_t height) {
+        if (runs == 0) { TEST_ASSERT_EQUAL_UINT32(32, top); TEST_ASSERT_EQUAL_UINT32(32, height); }
+        if (runs == 1) { TEST_ASSERT_EQUAL_UINT32(96, top); TEST_ASSERT_EQUAL_UINT32(16, height); }
+        ++runs; return true;
+      }));
+  TEST_ASSERT_EQUAL_UINT32(2, runs);
 }
 
 void test_latches_each_contact_until_penirq_is_high_for_twenty_ms() {
@@ -79,7 +120,8 @@ void tearDown() {}
 int runTests() {
   UNITY_BEGIN();
   RUN_TEST(test_maps_measured_swapped_rotation_one_calibration);
-  RUN_TEST(test_filters_five_raw_samples_with_median);
+  RUN_TEST(test_calibrated_axes_pressure_target_and_inversion);
+  RUN_TEST(test_only_changed_display_bands_are_transferred);
   RUN_TEST(test_latches_each_contact_until_penirq_is_high_for_twenty_ms);
   RUN_TEST(test_switches_tabs_only_in_the_header);
   RUN_TEST(test_maps_all_nine_display_buttons_to_the_supported_timeouts);

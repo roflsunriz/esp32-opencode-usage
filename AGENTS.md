@@ -37,15 +37,15 @@ Get-Content -Raw -LiteralPath .\COMMON-AGENTS.md
 - WindowsのCH340実機でserialport 13はBunでもNode.js単独でもwriteが停止した。import・列挙・openだけでは検出できない。製品のUSB通信は `host/serial-worker.py` をPython/pySerialで起動して行う。実機で連続送受信を検証せずネイティブNode bindingへ戻さない。
 - Bunの子プロセスstdinは `flush()` のPromiseを処理する。未処理の非同期EPIPEはホスト全体を終了させる。workerのcloseはシリアルを閉じて終了し、親もEOFと終了タイムアウトを扱う。退行テストは `host/device.test.ts`。
 - Preferencesの `putString("")` は成功時も0を返すため、単純な `>0` 判定ではWi-Fi削除が失敗する。現在はバージョンとCRC付きの単一blobへ保存し、相関ID付きACKを保存完了後に返す。
-- LCDのGRAMはAdafruitの公開SPI低レベルAPIでRAMRDを発行して読み出せた。`screenshot` はUSB診断専用、2MHz、RGBの3バイト/画素、960バイトの行バッファ。読み出した画像で表示を確認できる。
+- 2026-09-09の旧版ではAdafruitの公開SPI低レベルAPIでGRAMを読み出した。2026-09-14以降の`screenshot`はTFT_eSPIの`readRectRGB`で従来の2MHz・1行960バイトずつ読み、実機の画像一致は未再確認（`platformio.ini`、`display_controller.cpp`、`verification.md`）。
 - PlatformIO nativeのWindows LLVM対応は `firmware/test/native-toolchain.py` のビルドmiddlewareで適用する。通常のpreスクリプトでCCを置換するだけではnative builderがGCC設定へ戻す。UnityのnativeテストにはC++の `main` と `UNITY_INCLUDE_DOUBLE` が必要。
 
 - TLS信頼束はGoogle公式のGTS Root R4 (`gtsr4.pem`) とGlobalSign Root CA (`gsr1.pem`)。GlobalSign ECC R4 (`gsr4.pem`) は今回のサーバーchainとは異なる。PEMを手転記すると一文字の差でもTLS接続が失敗するため、`scripts/update-ca.py` で生成し `--check` で公式ファイルと完全一致を確認する。
 - ESP32のDRAMには大きな固定HTML/JSバッファを置かない。64KiBの転送上限を逐次走査し、使用量応答だけ4KiBへ保持する。認証レコードは約4KiBあり、設定解析や保存時の複製をloopタスクのstackへ置かない。
 - ESP32へ認証を送る前に `firmware=opencode-go-lcd` と `setupSchema=3` のready/ping応答を確認する。別ファームウェアが動くUSBポートへ秘密情報を送信しない。
-- ESP32-2432S028の回路図ではXPT2046の`/PENIRQ`が外部10kΩプルアップ付きでGPIO36へ接続され、LOWがタッチを示す。GPIO36は入力専用なので内部プルアップを指定しない。XPT2046は直前の制御byteでPD0=1のままだとPENIRQを無効化するため、`display_controller.cpp`は回路図で確認した25/33/32/39のtouch SPIを使い、起動時にPD0=0の完了トランザクションを送り、その後の座標読出しは2MHz・median 5点で行う。PENIRQ変動の重複操作を避けるため、タップはGPIO36がHIGHで20ms安定するまで一度だけ受理する。根拠: ESP32-2432S028回路図のU3部、XPT2046 datasheet Table 8/PENIRQ Output、Adafruit TSC2046 driverの2MHz上限（2026-09-09確認）。
-- ILI9341 `rotation(1)`での実機DisplayタブタップはrawX約500..800、rawY約2500..2900だった。2026-09-09時点のこの基板では画面変換をaxes swap・非反転（`screenX`はrawY、`screenY`はrawX）とする。範囲は暫定でrawX=280..3860、rawY=340..3860を保ち、`type:"touch"`のraw/mapped診断で基板差を再確認してからのみ変更する。
+- ESP32-2432S028の回路図ではXPT2046の`/PENIRQ`が外部10kΩプルアップ付きでGPIO36へ接続され、LOWがタッチを示す。GPIO36は入力専用なので内部プルアップを指定しない。XPT2046は直前の制御byteでPD0=1のままだとPENIRQを無効化するため、`display_controller.cpp`は起動時にPD0=0を送り、以後は別VSPI（25/33/32/39）上の通知版`SensitiveXpt2046`ドライバーでPD0=0を維持する。座標は3回近接取得し、GPIO36がHIGHで20ms安定するまで一度だけ受理する。根拠: ESP32-2432S028回路図のU3部、XPT2046 datasheet Table 8/PENIRQ Output、`lib/sensitive-xpt2046`。
+- ILI9341 `rotation(1)`での実機DisplayタブタップはrawX約500..800、rawY約2500..2900だった。2026-09-09時点のこの基板では画面変換をaxes swap・非反転（`screenX`はrawY、`screenY`はrawX）とする。未調整時はrawX=280..3860、rawY=340..3860を維持し、BOOT長押しで取得した2点の位置・押圧値をNVS `opencode-touch` へ保存して次回起動時に適用する。`type:"touch"`のraw/mapped診断で基板差を再確認する。
 
-- BOOT(GPIO0)は通常入力として扱い、10msのesp_timerで両エッジ30msのデバウンスを行う。同期HTTPS/USB画像転送中もクリックを保持し、NVS保存とrotation 1/3切替はmainで処理する。2026-09-10のCH340実機ではRTS=falseのままDTR=true→falseでGPIO0押下/解放を再現できた。物理ボタン・タッチの検証とは区別する。`screenshot`はrotation 1の固定座標で読出して元のrotationへ戻し、反転状態を画像で確認できる。
+- BOOT(GPIO0)は通常入力として扱い、10msのesp_timerで両エッジ30msのデバウンスを行う。同期HTTPS/USB画像転送中もイベントを保持し、短押しでNVS保存とrotation 1/3切替、1.5秒以上の長押しで位置・押圧感度調整をmainで処理する。2026-09-10のCH340実機ではRTS=falseのままDTR=true→falseでGPIO0押下/解放を再現できたが、新しい長押し経路は実機未検証。`screenshot`はrotation 1の固定座標で読出して元のrotationへ戻す。
 - NVS schemaは4だがUSBの`setupSchema`は互換形式の3を維持する。変更時に両者を混同してホストの認証送信判定を壊さない。旧schema 2/3から認証と消灯設定を保って移行する（`config_store.cpp`とnativeテスト参照）。配布物の`firmware-full.bin`を0へ書くとNVSも初期化するため、設定を保つ更新は個別イメージまたはPlatformIO uploadを使う。
-- LCDにfillScreen/fillRectで背景を消してから文字を描くと、実機の操作ごとにちらついた。`display_controller.cpp`の10KiB・16行帯canvasで完成画像を転送する方式を維持し、全画面150KiBバッファへ安易に戻さない。2026-09-10の実機で同一表示の使用量12回更新のACK中央値202.023ms→56.061ms、GRAM全画素一致を確認した。比較では画面に表示しないupdatedAtだけを変え、通信時間も含む値である。
+- LCDにfillScreen/fillRectで背景を消してから文字を描くと、実機の操作ごとにちらついた。2026-09-14以降は通知版のTFT_eSPIで320×240の8-bit Sprite（約75KiB）へ完成画面を描き、16行帯の差分だけを連続帯にまとめて転送する（`include/display-diff.h`、`display_controller.cpp`）。回転・校正後は全帯を再転送する。Spriteを作成できない場合は直接描画へフォールバックするため、専用基板でTLS中のメモリとちらつきの有無を再確認する。2026-09-10の10KiB帯canvasでのACK中央値とGRAM一致は旧経路の履歴であり新経路の結果ではない。

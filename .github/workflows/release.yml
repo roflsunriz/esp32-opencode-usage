@@ -59,6 +59,7 @@ jobs:
           cp start.cmd release/host/
           cp package.json bun.lock requirements.txt requirements-dev.txt tsconfig.json eslint.config.js platformio.ini release/host/
           cp -R firmware release/host/
+          cp -R lib release/host/
           cp README.md how-to-update.md verification.md release/host/
           cp LICENSE SECURITY.md release/host/
           mkdir -p release/host/docs
@@ -103,6 +104,7 @@ jobs:
           EOF
           cp platformio.ini release/firmware/
           cp -R firmware release/firmware/firmware
+          cp -R lib release/firmware/lib
           mkdir -p release/firmware/app-objects
           cp .pio/build/esp32dev/src/*.o release/firmware/app-objects/
           mkdir -p release/firmware/licenses

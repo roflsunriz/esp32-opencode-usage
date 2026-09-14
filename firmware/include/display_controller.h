@@ -1,7 +1,7 @@
 #pragma once
 
-#include <Adafruit_GFX.h>
-#include <Adafruit_ILI9341.h>
+#include <TFT_eSPI.h>
+#include <sensitive-xpt2046.h>
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 
@@ -9,7 +9,9 @@
 #include <cstdint>
 
 #include "backlight_timer.h"
+#include "board_pins.h"
 #include "boot_button.h"
+#include "display-diff.h"
 #include "touch_ui.h"
 #include "usage_model.h"
 
@@ -34,6 +36,8 @@ public:
   void setScreenFlipped(bool flipped);
   void redraw(const usage_model::UsageSnapshot *snapshot, uint32_t timeoutSec);
   bool consumeBootClick();
+  bool consumeBootCalibration();
+  void calibrateTouch();
   void capture();
   void renderNoData(const char *message);
   void renderSnapshot(const usage_model::UsageSnapshot &snapshot);
@@ -63,36 +67,36 @@ private:
   uint32_t nowMs() const;
   void armTouchInterrupt();
   bool readTouchPoint(touch_ui::Point &point);
-  uint16_t readTouchCoordinate(uint8_t command);
+  bool captureCalibrationPoint(int16_t &rawX, int16_t &rawY,
+                               int16_t &pressure);
+  void loadCalibration();
+  bool saveCalibration();
   void presentScreen();
   void presentStatusBand();
-  void presentBand(uint16_t top);
-  void drawScreen(Adafruit_GFX &surface);
-  void drawHeader(Adafruit_GFX &surface);
-  void drawDisplaySettings(Adafruit_GFX &surface,
+  void drawScreen(TFT_eSPI &surface);
+  void drawHeader(TFT_eSPI &surface);
+  void drawDisplaySettings(TFT_eSPI &surface,
                            uint32_t selectedTimeoutSec);
-  void drawUsage(Adafruit_GFX &surface);
-  void drawStatus(Adafruit_GFX &surface);
-  void drawPeriod(Adafruit_GFX &surface, const char *label,
+  void drawUsage(TFT_eSPI &surface);
+  void drawStatus(TFT_eSPI &surface);
+  void drawPeriod(TFT_eSPI &surface, const char *label,
                   const usage_model::PeriodUsage &period, int16_t top);
-  void drawReset(Adafruit_GFX &surface, int16_t x, int16_t y,
+  void drawReset(TFT_eSPI &surface, int16_t x, int16_t y,
                  int64_t resetInSec);
-  void drawTextClipped(Adafruit_GFX &surface, const char *message, int16_t x,
+  void drawTextClipped(TFT_eSPI &surface, const char *message, int16_t x,
                        int16_t y, uint8_t textSize, uint16_t color,
                        uint16_t maxWidth);
   bool updateStatus(const char *message, uint16_t color);
   bool updateSnapshot(const usage_model::UsageSnapshot &snapshot);
 
-  SPIClass spi_;
   SPIClass touchSpi_;
-  Adafruit_ILI9341 tft_;
+  TFT_eSPI tft_;
+  TFT_eSprite canvas_;
+  SensitiveXpt2046 touch_;
   char status_[72] = "Waiting for usage";
   uint16_t statusColor_ = ILI9341_WHITE;
-  // One RGB565 scanline band. A full 320x240 framebuffer would consume about
-  // 150 KiB of DRAM needed by TLS, while this fixed 10 KiB buffer lets every
-  // transfer replace only complete image bands.
-  static constexpr uint16_t kFrameBandHeight = 16;
-  uint16_t frameBand_[touch_ui::kDisplayWidth * kFrameBandHeight] = {};
+  bool canvasReady_ = false;
+  display_diff::Bands bandDiff_;
   usage_model::UsageSnapshot displayedSnapshot_;
   uint32_t displayedTimeoutSec_ = backlight_timer::kDefaultTimeoutSec;
   bool hasDisplayedSnapshot_ = false;
@@ -109,5 +113,12 @@ private:
   touch_ui::ReleaseLatch touchLatch_;
   boot_button::Model bootButton_;
   uint32_t pendingBootClicks_ = 0;
+  uint32_t pendingBootCalibrations_ = 0;
   bool screenFlipped_ = false;
+  struct TouchCalibration {
+    int16_t left = touch_ui::kRawYMin, right = touch_ui::kRawYMax;
+    int16_t top = touch_ui::kRawXMin, bottom = touch_ui::kRawXMax;
+    int16_t pressure = 120;
+    bool configured = false;
+  } touchCalibration_;
 };
