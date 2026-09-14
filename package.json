@@ -6,7 +6,7 @@
     "@types/bun": "latest",
     "eslint": "^10.10.0",
     "prettier": "^3.6.0",
-    "typescript": "^5.9.0",
+    "typescript": "^7.0.2",
     "typescript-eslint": "^8.46.0"
   },
   "engines": {
