@@ -495,7 +495,7 @@ void DisplayController::presentStatusBand() {
 }
 
 void DisplayController::drawScreen(TFT_eSPI &surface) {
-  surface.fillScreen(kBackground);
+  display_diff::clearFrame(surface, kBackground);
   drawHeader(surface);
   if (activeTab_ == touch_ui::Tab::kDisplay) {
     drawDisplaySettings(surface, displayedTimeoutSec_);

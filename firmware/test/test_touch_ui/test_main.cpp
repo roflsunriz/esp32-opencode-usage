@@ -66,6 +66,18 @@ void test_only_changed_display_bands_are_transferred() {
   TEST_ASSERT_EQUAL_UINT32(2, runs);
 }
 
+void test_sprite_clear_covers_full_320_pixel_width() {
+  struct Surface {
+    int width = 0, height = 0;
+    void fillRect(int, int, int w, int h, uint32_t) {
+      width = w; height = h;
+    }
+  } surface;
+  display_diff::clearFrame(surface, 0x1082);
+  TEST_ASSERT_EQUAL_INT(320, surface.width);
+  TEST_ASSERT_EQUAL_INT(240, surface.height);
+}
+
 void test_latches_each_contact_until_penirq_is_high_for_twenty_ms() {
   touch_ui::ReleaseLatch latch;
   TEST_ASSERT_TRUE(latch.accept());
@@ -122,6 +134,7 @@ int runTests() {
   RUN_TEST(test_maps_measured_swapped_rotation_one_calibration);
   RUN_TEST(test_calibrated_axes_pressure_target_and_inversion);
   RUN_TEST(test_only_changed_display_bands_are_transferred);
+  RUN_TEST(test_sprite_clear_covers_full_320_pixel_width);
   RUN_TEST(test_latches_each_contact_until_penirq_is_high_for_twenty_ms);
   RUN_TEST(test_switches_tabs_only_in_the_header);
   RUN_TEST(test_maps_all_nine_display_buttons_to_the_supported_timeouts);

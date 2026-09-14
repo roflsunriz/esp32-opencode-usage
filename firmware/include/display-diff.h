@@ -11,6 +11,13 @@ constexpr size_t kBandCount = kHeight / kBandHeight;
 static_assert(kHeight % kBandHeight == 0 && kBandCount <= 16,
               "band mask requires complete 16-bit coverage");
 
+// TFT_eSpriteをTFT_eSPI基底参照で扱うときも初期幅240ではなく320全幅を消す。
+template <class Surface>
+void clearFrame(Surface& surface, uint32_t color) {
+  surface.fillRect(0, 0, static_cast<int32_t>(kWidth),
+                   static_cast<int32_t>(kHeight), color);
+}
+
 // TFT_eSprite 2.5.43の8-bit画像は1行320バイトの連続配置。
 class Bands {
  public:
