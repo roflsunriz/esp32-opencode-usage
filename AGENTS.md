@@ -30,6 +30,7 @@ Get-Content -Raw -LiteralPath .\COMMON-AGENTS.md
 
 - USB機器を書き換える前に、全フラッシュを読み取り、実機とのdigest一致を確認する。検証後は全フラッシュを書き戻して再照合する。アプリ領域だけの退避ではNVSや設定を復旧できない。
 - 今回接続されたESP32は4MBフラッシュ、COM3だった。ポートと容量は毎回実測し、固定の機器識別情報を一般仕様にしない。
+- 2026-09-16のCOM6基板（ESP32-D0WD-V3・4MB）では `pio run -e esp32dev -t upload` が `Wrong boot mode detected (0x13)` で失敗し、BOOT押下保持中に再実行して成功した。書き込み後はBOOTを離してRSTを押さないと書込待機のまま応答しない。全フラッシュ退避の `verify-flash` も460800では同エラーが出ることがあり、115200での再実行でdigest一致を確認した（`verification.md`）。
 - PlatformIOのキャッシュは必要に応じ `PLATFORMIO_CORE_DIR` でリポジトリ内 `.platformio` に設定する。Bunの一時領域が権限制限に当たる環境では `TEMP`/`TMP` と `BUN_INSTALL_CACHE_DIR` を `.private/` 内へ設定して実行する。
 - `.platformio/packages/tool-esptoolpy/_contrib` のDACLに許可がなく読取不可になることがある（所有者は自分のまま）。`icacls <path> /grant <user>:(OI)(CI)F /t` で修復できる。権限不足のまま `pio run` するとbootloader生成でPermissionErrorになる。壊れたパッケージを中途半端に削除するとesptool本体が欠けて `_main` なしエラーになるため、修復後に不足時はディレクトリ全体を消して `pio run` で再取得する。
 

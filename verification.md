@@ -145,3 +145,13 @@ python scripts/capture-lcd.py --port COM3 --output .private/lcd.png
 - 空の出力ディレクトリへリリースワークフローと同じ処理でZIP/tar.gzを組み立て、ファームウェア・同梱ソース・結合イメージ内のアプリ位置を照合した。ホストのランチャー・USB worker・バージョン・更新手順・ライセンスが入り、秘密情報やキャッシュが含まれないことを確認。配布ホストからヘルプとポート一覧も表示できた。
 - mainのGitHub Actionsでホスト検査・ESP32ビルド・nativeテストが成功した。
 - 最後に検証前の全4,194,304バイトを同じ実機へ書き戻し、`verify-flash`でdigestの完全一致を確認した。実機に残した状態は検証前のファームウェア・設定である。
+
+## COM6基板への現行ファームウェア書き込み（2026-09-16）
+
+対象はCOM6のESP32-D0WD-V3・4MBフラッシュ（`flash-id`で実測）。COM3/COM4は不在だった。書き換え前に全4,194,304バイトを機器別の退避先へ保存し、`verify-flash`（115200）でdigest一致を確認した。退避バックアップは `.private/` に保管し、既存の `original-flash.bin` は上書きしていない。
+
+- `pio run -e esp32dev` が成功（RAM 73,516 / 327,680バイト、アプリ991,669 / 1,310,720バイト）。
+- `pio run -e esp32dev -t upload --upload-port COM6` は自動リセットで `Wrong boot mode detected (0x13)` となり、BOOT押下保持中の再実行で23秒で成功した。NVS保持のupload方式のため `firmware-full.bin` のオフセット0書き込みは使っていない。
+- 書き込み直後はBOOT保持のままリセットされて書込待機になっていたため、BOOTを離してRSTを押して起動させた。
+- `{"version":1,"type":"ping"}` に対し `firmware=opencode-go-lcd`、`setupSchema=3` のACKを確認した（`version`なしのpingは `unsupported protocol version` になる）。応答時は `wifiEnabled=false`、`hasUsage=false`、`backlightTimeoutSec=60` だった。
+- 書き込み確認中にタッチの `tap` イベント受信も確認した。表示・タッチの実機目視検証と、退避バックアップの書き戻しは未実施（書き込み自体が依頼のため現行ファームウェアを残している）。
