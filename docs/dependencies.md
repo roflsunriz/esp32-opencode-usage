@@ -26,7 +26,7 @@ Node.js 24は開発用fake fixtureテストだけで使います。製品のホ�
 
 | 依存関係                                                                    | 宣言                                    | 採用理由・保守状況                                                            | ライセンス           |
 | --------------------------------------------------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------- | -------------------- |
-| [PlatformIO Core](https://github.com/platformio/platformio-core)            | `requirements-dev.txt` の `6.1.19`      | ESP32ビルド、nativeテスト、依存ライブラリ解決を `platformio.ini` で再現する。 | Apache-2.0           |
+| [PlatformIO Core](https://github.com/platformio/platformio-core)            | `requirements-dev.txt` の `6.2.0`       | ESP32ビルド、nativeテスト、依存ライブラリ解決を `platformio.ini` で再現する。 | Apache-2.0           |
 | [Espressif 32 platform](https://github.com/platformio/platform-espressif32) | `platformio.ini` の `espressif32@7.1.2` | ESP32ボード定義、Arduino framework、ツールチェーンを固定する。                | Apache-2.0           |
 | [arduino-esp32](https://github.com/espressif/arduino-esp32)                 | PlatformIO経由                          | Wi-Fi、NVS、SPI、TLS、時刻同期などESP32実装の基盤。                           | LGPL-2.1             |
 | [TFT_eSPI](https://github.com/Bodmer/TFT_eSPI)                              | `2.5.43`                                | 通知版と同じILI9341描画に統一し、8-bit Spriteから変化した16行帯だけ転送する。旧Adafruit GFX/ILI9341を置き換えた。 | MIT/BSD/FreeBSD（同梱license.txt） |
