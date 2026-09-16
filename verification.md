@@ -155,3 +155,12 @@ python scripts/capture-lcd.py --port COM3 --output .private/lcd.png
 - 書き込み直後はBOOT保持のままリセットされて書込待機になっていたため、BOOTを離してRSTを押して起動させた。
 - `{"version":1,"type":"ping"}` に対し `firmware=opencode-go-lcd`、`setupSchema=3` のACKを確認した（`version`なしのpingは `unsupported protocol version` になる）。応答時は `wifiEnabled=false`、`hasUsage=false`、`backlightTimeoutSec=60` だった。
 - 書き込み確認中にタッチの `tap` イベント受信も確認した。表示・タッチの実機目視検証と、退避バックアップの書き戻しは未実施（書き込み自体が依頼のため現行ファームウェアを残している）。
+
+## COM6基板の初期設定（2026-09-16）
+
+書き込み直後のCOM6基板に対し、PC操作画面（`start.cmd`→`http://127.0.0.1:8765`）から初期設定を行った。事前に `ping` で `firmware=opencode-go-lcd`・`setupSchema=3` を確認してから認証を送った。
+
+- 操作画面でログインを完了し、COM6へ接続、SSID・パスワード・取得間隔を保存して保存完了応答を確認した。
+- `/api/status` で `authenticated=true`、COM6の `connected=true`・`compatible=true`、「ESP32の直接更新を確認」（`lastDirectUpdate` あり）、使用量の取得を確認した。
+- 保存後の直接 `ping` 再確認は、操作画面がCOM6を保持しているため行わず、状態は上記の `/api/status` で確認した。
+- PC停止後の再起動保持や60秒間隔の継続更新の再確認は未実施。行う場合は操作画面を停止しESP32をリセットして複数回の更新を確認する。
