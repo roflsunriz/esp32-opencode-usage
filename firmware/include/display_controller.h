@@ -64,7 +64,6 @@ private:
   static void IRAM_ATTR touchInterrupt(void *context);
   void handleBacklightTimer();
   void IRAM_ATTR handleTouchInterrupt();
-  bool wakeForTouchLocked(uint32_t currentMs);
   void setBacklightPinLocked(bool on);
   uint32_t nowMs() const;
   void armTouchInterrupt();
@@ -108,7 +107,6 @@ private:
   backlight_timer::Model backlight_;
   volatile bool touchWakePending_ = false;
   volatile bool touchReadPending_ = false;
-  bool touchWakeOnly_ = false;
   bool backlightStateChanged_ = false;
   bool backlightTimerReady_ = false;
   touch_ui::Tab activeTab_ = touch_ui::Tab::kUsage;

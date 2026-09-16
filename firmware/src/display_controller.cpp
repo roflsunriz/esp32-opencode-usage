@@ -187,27 +187,12 @@ void DisplayController::handleBacklightTimer() {
       backlightStateChanged_ = true;
     }
   }
-  const bool touchHandled = wakeForTouchLocked(currentMs);
-  const bool changed = touchHandled ? false : backlight_.tick(currentMs);
+  const bool changed = backlight_.tick(currentMs);
   if (changed) {
     setBacklightPinLocked(backlight_.isOn());
     backlightStateChanged_ = true;
   }
   portEXIT_CRITICAL(&backlightMux_);
-}
-
-bool DisplayController::wakeForTouchLocked(uint32_t currentMs) {
-  if (!touchWakePending_) {
-    return false;
-  }
-  touchWakePending_ = false;
-  const bool wakeOnly = !backlight_.isOn();
-  if (backlight_.wake(currentMs)) {
-    setBacklightPinLocked(true);
-    backlightStateChanged_ = true;
-  }
-  touchWakeOnly_ = touchWakeOnly_ || wakeOnly;
-  return true;
 }
 
 void IRAM_ATTR DisplayController::touchInterrupt(void *context) {
@@ -412,7 +397,7 @@ void DisplayController::calibrateTouch() {
   bandDiff_.invalidate();
   wakeBacklight();
   portENTER_CRITICAL(&backlightMux_);
-  touchReadPending_ = touchWakePending_ = touchWakeOnly_ = false;
+  touchReadPending_ = touchWakePending_ = false;
   portEXIT_CRITICAL(&backlightMux_);
   touchLatch_ = touch_ui::ReleaseLatch();
 }
@@ -420,13 +405,12 @@ void DisplayController::calibrateTouch() {
 bool DisplayController::pollTouch(TouchEvent &event) {
   event = TouchEvent();
   const uint32_t currentMs = nowMs();
-  touchLatch_.update(digitalRead(board_pins::touch_irq) == LOW, currentMs);
+  const bool penLow = digitalRead(board_pins::touch_irq) == LOW;
+  touchLatch_.update(penLow, currentMs);
   portENTER_CRITICAL(&backlightMux_);
   const bool pending = touchReadPending_;
   touchReadPending_ = false;
-  wakeForTouchLocked(currentMs);
-  const bool wakeOnly = touchWakeOnly_;
-  touchWakeOnly_ = false;
+  touchWakePending_ = false;
   portEXIT_CRITICAL(&backlightMux_);
   if (!pending) {
     return false;
@@ -434,11 +418,26 @@ bool DisplayController::pollTouch(TouchEvent &event) {
   if (!touchLatch_.accept()) {
     return false;
   }
-  if (wakeOnly) {
-    event.kind = TouchEventKind::kWakeOnly;
+  if (!penLow) {
+    // PENIRQ glitch (for example a conversion transient) with no finger
+    // present. Stay silent so noise cannot wake the backlight, defer the
+    // network, or spam touch diagnostics.
+    return false;
+  }
+  portENTER_CRITICAL(&backlightMux_);
+  const bool wasOff = !backlight_.isOn();
+  portEXIT_CRITICAL(&backlightMux_);
+  if (!readTouchPoint(event.point)) {
+    // A real contact that failed validation still wakes a sleeping screen,
+    // but it is not a tap.
+    if (wasOff) {
+      wakeBacklight();
+    }
     return true;
   }
-  if (!readTouchPoint(event.point)) {
+  wakeBacklight();
+  if (wasOff) {
+    event.kind = TouchEventKind::kWakeOnly;
     return true;
   }
   event.kind = TouchEventKind::kTap;
