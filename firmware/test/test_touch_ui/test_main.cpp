@@ -22,26 +22,72 @@ void test_maps_measured_swapped_rotation_one_calibration() {
   TEST_ASSERT_FALSE(touch_ui::isPlausibleRaw(0, 2000));
 }
 
-void test_calibrated_axes_pressure_target_and_inversion() {
-  const auto leftTop = touch_ui::mapPointCalibrated(280, 340, false,
-                                                   340, 3860, 280, 3860);
+void test_migrated_legacy_map_matches_previous_behavior() {
+  const touch_ui::CalibratedMap map =
+      touch_ui::calibratedFromLegacy(340, 3860, 280, 3860);
+  TEST_ASSERT_FALSE(map.useRawXForX);
+  TEST_ASSERT_FALSE(map.useRawYForY);
+  TEST_ASSERT_TRUE(touch_ui::calibratedSpansValid(map));
+  const auto leftTop = touch_ui::mapPointWithMap(280, 340, false, map);
   TEST_ASSERT_EQUAL_UINT16(24, leftTop.x);
   TEST_ASSERT_EQUAL_UINT16(24, leftTop.y);
-  const auto rightBottom = touch_ui::mapPointCalibrated(3860, 3860, false,
-                                                       340, 3860, 280, 3860);
+  const auto rightBottom = touch_ui::mapPointWithMap(3860, 3860, false, map);
   TEST_ASSERT_EQUAL_UINT16(295, rightBottom.x);
   TEST_ASSERT_EQUAL_UINT16(215, rightBottom.y);
-  const auto inverted = touch_ui::mapPointCalibrated(280, 340, true,
-                                                    340, 3860, 280, 3860);
+  const auto inverted = touch_ui::mapPointWithMap(280, 340, true, map);
   TEST_ASSERT_EQUAL_UINT16(295, inverted.x);
   TEST_ASSERT_EQUAL_UINT16(215, inverted.y);
-  const auto reversed = touch_ui::mapPointCalibrated(3860, 3860, false,
-                                                    3860, 340, 3860, 280);
-  TEST_ASSERT_EQUAL_UINT16(24, reversed.x);
-  TEST_ASSERT_EQUAL_UINT16(24, reversed.y);
+  const touch_ui::CalibratedMap reversed =
+      touch_ui::calibratedFromLegacy(3860, 340, 3860, 280);
+  const auto mirrored = touch_ui::mapPointWithMap(3860, 3860, false, reversed);
+  TEST_ASSERT_EQUAL_UINT16(24, mirrored.x);
+  TEST_ASSERT_EQUAL_UINT16(24, mirrored.y);
   TEST_ASSERT_EQUAL_INT16(12, touch_ui::pressureThresholdFor(10));
   TEST_ASSERT_EQUAL_INT16(15, touch_ui::pressureThresholdFor(30));
   TEST_ASSERT_EQUAL_INT16(120, touch_ui::pressureThresholdFor(600));
+}
+
+void test_builds_straight_panel_map_from_measured_rows_and_columns() {
+  // COM6 board (2026-09-16 diagnostics): rawX follows screen x and rawY
+  // follows screen y, so the row pair varies rawX and the column pair rawY.
+  const touch_ui::CalibratedMap map = touch_ui::buildCalibratedMap(
+      {400, 600}, {3400, 700}, {450, 3500});
+  TEST_ASSERT_TRUE(map.useRawXForX);
+  TEST_ASSERT_TRUE(map.useRawYForY);
+  TEST_ASSERT_EQUAL_INT16(400, map.xStart);
+  TEST_ASSERT_EQUAL_INT16(3400, map.xEnd);
+  TEST_ASSERT_EQUAL_INT16(600, map.yStart);
+  TEST_ASSERT_EQUAL_INT16(3500, map.yEnd);
+  TEST_ASSERT_TRUE(touch_ui::calibratedSpansValid(map));
+  const auto center = touch_ui::mapPointWithMap(1900, 2050, false, map);
+  TEST_ASSERT_EQUAL_UINT16(159, center.x);
+  TEST_ASSERT_EQUAL_UINT16(119, center.y);
+  const auto flipped = touch_ui::mapPointWithMap(1900, 2050, true, map);
+  TEST_ASSERT_EQUAL_UINT16(160, flipped.x);
+  TEST_ASSERT_EQUAL_UINT16(120, flipped.y);
+}
+
+void test_builds_swapped_panel_map_from_measured_rows_and_columns() {
+  // 2026-09-09 board: Display-tab taps read rawX≈500..800 with
+  // rawY≈2500..2900, so the row pair varies rawY and the column pair rawX.
+  const touch_ui::CalibratedMap map = touch_ui::buildCalibratedMap(
+      {600, 400}, {700, 3400}, {3500, 450});
+  TEST_ASSERT_FALSE(map.useRawXForX);
+  TEST_ASSERT_FALSE(map.useRawYForY);
+  TEST_ASSERT_EQUAL_INT16(400, map.xStart);
+  TEST_ASSERT_EQUAL_INT16(3400, map.xEnd);
+  TEST_ASSERT_EQUAL_INT16(600, map.yStart);
+  TEST_ASSERT_EQUAL_INT16(3500, map.yEnd);
+  TEST_ASSERT_TRUE(touch_ui::calibratedSpansValid(map));
+  const auto center = touch_ui::mapPointWithMap(2050, 1900, false, map);
+  TEST_ASSERT_EQUAL_UINT16(159, center.x);
+  TEST_ASSERT_EQUAL_UINT16(119, center.y);
+}
+
+void test_rejects_calibration_without_sufficient_spans() {
+  const touch_ui::CalibratedMap map =
+      touch_ui::buildCalibratedMap({100, 100}, {150, 120}, {110, 160});
+  TEST_ASSERT_FALSE(touch_ui::calibratedSpansValid(map));
 }
 
 void test_only_changed_display_bands_are_transferred() {
@@ -132,7 +178,10 @@ void tearDown() {}
 int runTests() {
   UNITY_BEGIN();
   RUN_TEST(test_maps_measured_swapped_rotation_one_calibration);
-  RUN_TEST(test_calibrated_axes_pressure_target_and_inversion);
+  RUN_TEST(test_migrated_legacy_map_matches_previous_behavior);
+  RUN_TEST(test_builds_straight_panel_map_from_measured_rows_and_columns);
+  RUN_TEST(test_builds_swapped_panel_map_from_measured_rows_and_columns);
+  RUN_TEST(test_rejects_calibration_without_sufficient_spans);
   RUN_TEST(test_only_changed_display_bands_are_transferred);
   RUN_TEST(test_sprite_clear_covers_full_320_pixel_width);
   RUN_TEST(test_latches_each_contact_until_penirq_is_high_for_twenty_ms);

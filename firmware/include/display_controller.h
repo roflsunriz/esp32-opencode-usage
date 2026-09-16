@@ -48,6 +48,8 @@ public:
   bool pollTouch(TouchEvent &event);
   bool hasTouchPending();
   touch_ui::Tab activeTab() const { return activeTab_; }
+  bool touchCalibrated() const { return touchCalibration_.configured; }
+  int16_t touchPressureThreshold() const { return touchCalibration_.pressure; }
 
   bool setBacklightTimeoutSec(uint32_t timeoutSec);
   void wakeBacklight();
@@ -116,8 +118,7 @@ private:
   uint32_t pendingBootCalibrations_ = 0;
   bool screenFlipped_ = false;
   struct TouchCalibration {
-    int16_t left = touch_ui::kRawYMin, right = touch_ui::kRawYMax;
-    int16_t top = touch_ui::kRawXMin, bottom = touch_ui::kRawXMax;
+    touch_ui::CalibratedMap map;
     int16_t pressure = 120;
     bool configured = false;
   } touchCalibration_;

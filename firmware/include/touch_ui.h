@@ -35,6 +35,17 @@ constexpr uint16_t kGridGapX = 5;
 constexpr uint16_t kGridGapY = 6;
 constexpr uint32_t kReleaseStableMs = 20;
 
+// Calibration cross targets in rotation(1) coordinates. The first two share a
+// row and the first and third share a column, so each screen axis is measured
+// from its own pair. Two diagonal points cannot tell a swapped panel from a
+// straight one (both read small/small then large/large), which is why a third
+// point is required.
+constexpr int16_t kCalibTargetX0 = 24;
+constexpr int16_t kCalibTargetX1 = 295;
+constexpr int16_t kCalibTargetY0 = 24;
+constexpr int16_t kCalibTargetY1 = 215;
+constexpr int16_t kCalibMinSpan = 1000;
+
 enum class Tab : uint8_t { kUsage, kDisplay };
 enum class ActionKind : uint8_t { kNone, kUsageTab, kDisplayTab, kTimeout };
 
@@ -137,20 +148,106 @@ inline uint16_t mapAxisCalibrated(uint16_t raw, int16_t start, int16_t end,
   return static_cast<uint16_t>(value);
 }
 
-inline Point mapPointCalibrated(uint16_t rawX, uint16_t rawY, bool flipped,
-                                int16_t left, int16_t right,
-                                int16_t top, int16_t bottom) {
+// A measured raw pair from one calibration cross.
+struct RawXY {
+  RawXY() = default;
+  RawXY(int16_t xValue, int16_t yValue) : x(xValue), y(yValue) {}
+
+  int16_t x = 0;
+  int16_t y = 0;
+};
+
+// Per-board axis mapping. useRawXForX selects which raw axis drives screen x
+// (and symmetrically for y), so swapped, straight, and mirrored panels share
+// one code path. Bounds are raw values at the calibration targets and always
+// refer to the normal (non-flipped) orientation.
+struct CalibratedMap {
+  bool useRawXForX = false;
+  int16_t xStart = 0;
+  int16_t xEnd = 0;
+  bool useRawYForY = false;
+  int16_t yStart = 0;
+  int16_t yEnd = 0;
+};
+
+// Derives the axis mapping from three crosses: p1 at (X0, Y0), p2 at
+// (X1, Y0), p3 at (X0, Y1). Each screen axis takes the raw axis that varies
+// most across its own pair.
+inline CalibratedMap buildCalibratedMap(RawXY p1, RawXY p2, RawXY p3) {
+  CalibratedMap map;
+  const int32_t rowSpanX =
+      static_cast<int32_t>(p2.x) - static_cast<int32_t>(p1.x);
+  const int32_t rowSpanY =
+      static_cast<int32_t>(p2.y) - static_cast<int32_t>(p1.y);
+  if ((rowSpanX < 0 ? -rowSpanX : rowSpanX) >=
+      (rowSpanY < 0 ? -rowSpanY : rowSpanY)) {
+    map.useRawXForX = true;
+    map.xStart = p1.x;
+    map.xEnd = p2.x;
+  } else {
+    map.useRawXForX = false;
+    map.xStart = p1.y;
+    map.xEnd = p2.y;
+  }
+  const int32_t columnSpanX =
+      static_cast<int32_t>(p3.x) - static_cast<int32_t>(p1.x);
+  const int32_t columnSpanY =
+      static_cast<int32_t>(p3.y) - static_cast<int32_t>(p1.y);
+  if ((columnSpanY < 0 ? -columnSpanY : columnSpanY) >=
+      (columnSpanX < 0 ? -columnSpanX : columnSpanX)) {
+    map.useRawYForY = true;
+    map.yStart = p1.y;
+    map.yEnd = p3.y;
+  } else {
+    map.useRawYForY = false;
+    map.yStart = p1.x;
+    map.yEnd = p3.x;
+  }
+  return map;
+}
+
+inline int32_t calibratedSpan(int16_t start, int16_t end) {
+  return static_cast<int32_t>(end) - static_cast<int32_t>(start);
+}
+
+inline bool calibratedSpansValid(const CalibratedMap &map) {
+  const int32_t xSpan = calibratedSpan(map.xStart, map.xEnd);
+  const int32_t ySpan = calibratedSpan(map.yStart, map.yEnd);
+  const int32_t xAbs = xSpan < 0 ? -xSpan : xSpan;
+  const int32_t yAbs = ySpan < 0 ? -ySpan : ySpan;
+  return xAbs > kCalibMinSpan && yAbs > kCalibMinSpan;
+}
+
+inline Point mapPointWithMap(uint16_t rawX, uint16_t rawY, bool flipped,
+                             const CalibratedMap &map) {
   Point point;
   point.rawX = rawX;
   point.rawY = rawY;
-  // 実機で確認した軸入れ替えを保つ。保存値は通常向きの物理座標。
-  point.x = mapAxisCalibrated(rawY, left, right, 24, 295, 319);
-  point.y = mapAxisCalibrated(rawX, top, bottom, 24, 215, 239);
+  const uint16_t xRaw = map.useRawXForX ? rawX : rawY;
+  const uint16_t yRaw = map.useRawYForY ? rawY : rawX;
+  point.x = mapAxisCalibrated(xRaw, map.xStart, map.xEnd, kCalibTargetX0,
+                              kCalibTargetX1, kDisplayWidth - 1);
+  point.y = mapAxisCalibrated(yRaw, map.yStart, map.yEnd, kCalibTargetY0,
+                              kCalibTargetY1, kDisplayHeight - 1);
   if (flipped) {
-    point.x = 319 - point.x;
-    point.y = 239 - point.y;
+    point.x = kDisplayWidth - 1 - point.x;
+    point.y = kDisplayHeight - 1 - point.y;
   }
   return point;
+}
+
+// Converts a version-1 record (fixed axis swap) to the general map so stored
+// calibrations keep working after the update.
+inline CalibratedMap calibratedFromLegacy(int16_t left, int16_t right,
+                                          int16_t top, int16_t bottom) {
+  CalibratedMap map;
+  map.useRawXForX = false;
+  map.xStart = left;
+  map.xEnd = right;
+  map.useRawYForY = false;
+  map.yStart = top;
+  map.yEnd = bottom;
+  return map;
 }
 
 inline int16_t pressureThresholdFor(int16_t weakestPressure) {

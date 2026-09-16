@@ -359,6 +359,8 @@ void sendPingAck() {
   document["hasUsage"] = hasUsage;
   document["renderCount"] = renderCount;
   document["wifiEnabled"] = wifiConfig.enabled;
+  document["touchCalibrated"] = display.touchCalibrated();
+  document["touchThreshold"] = display.touchPressureThreshold();
   addBacklightState(document, true);
   serializeJson(document, Serial);
   Serial.println();

@@ -25,14 +25,27 @@ constexpr uint64_t kBacklightTimerPeriodUs = 10000;
 constexpr uint32_t kTouchSpiFrequencyHz = 2000000;
 constexpr uint8_t kEnablePenIrqCommand = 0x90;
 constexpr int16_t kCapturePressure = 12;
-constexpr uint32_t kCalibrationVersion = 1;
+constexpr uint32_t kCalibrationVersion = 2;
+constexpr uint32_t kCalibrationVersionLegacy = 1;
 struct StoredCalibration {
+  uint32_t version;
+  int16_t values[7];
+  uint16_t check;
+};
+struct StoredCalibrationLegacy {
   uint32_t version;
   int16_t values[5];
   uint16_t check;
 };
-static_assert(sizeof(StoredCalibration) == 16, "touch calibration record size");
+static_assert(sizeof(StoredCalibration) == 20, "touch calibration record size");
+static_assert(sizeof(StoredCalibrationLegacy) == 16,
+              "legacy touch calibration record size");
 uint16_t calibrationCheck(const StoredCalibration& record) {
+  uint16_t result = 0xA53C;
+  for (const int16_t value : record.values) result ^= static_cast<uint16_t>(value);
+  return result;
+}
+uint16_t calibrationCheckLegacy(const StoredCalibrationLegacy& record) {
   uint16_t result = 0xA53C;
   for (const int16_t value : record.values) result ^= static_cast<uint16_t>(value);
   return result;
@@ -254,9 +267,8 @@ bool DisplayController::readTouchPoint(touch_ui::Point &point) {
   const uint16_t rawX = static_cast<uint16_t>(sumX / 3);
   const uint16_t rawY = static_cast<uint16_t>(sumY / 3);
   point = touchCalibration_.configured
-      ? touch_ui::mapPointCalibrated(rawX, rawY, screenFlipped_,
-                                    touchCalibration_.left, touchCalibration_.right,
-                                    touchCalibration_.top, touchCalibration_.bottom)
+      ? touch_ui::mapPointWithMap(rawX, rawY, screenFlipped_,
+                                  touchCalibration_.map)
       : touch_ui::mapPoint(rawX, rawY, screenFlipped_);
   return true;
 }
@@ -270,14 +282,32 @@ void DisplayController::loadCalibration() {
       stored.version == kCalibrationVersion &&
       stored.check == calibrationCheck(stored)) {
     TouchCalibration candidate;
-    candidate.left = stored.values[0];
-    candidate.right = stored.values[1];
-    candidate.top = stored.values[2];
-    candidate.bottom = stored.values[3];
-    candidate.pressure = stored.values[4];
+    candidate.map.useRawXForX = stored.values[0] != 0;
+    candidate.map.xStart = stored.values[1];
+    candidate.map.xEnd = stored.values[2];
+    candidate.map.useRawYForY = stored.values[3] != 0;
+    candidate.map.yStart = stored.values[4];
+    candidate.map.yEnd = stored.values[5];
+    candidate.pressure = stored.values[6];
     candidate.configured = true;
-    if (abs(candidate.right - candidate.left) > 1000 &&
-        abs(candidate.bottom - candidate.top) > 1000 &&
+    if (touch_ui::calibratedSpansValid(candidate.map) &&
+        candidate.pressure >= kCapturePressure && candidate.pressure <= 120)
+      touchCalibration_ = candidate;
+    prefs.end();
+    return;
+  }
+  StoredCalibrationLegacy legacy = {};
+  if (prefs.getBytesLength("calib") == sizeof(legacy) &&
+      prefs.getBytes("calib", &legacy, sizeof(legacy)) == sizeof(legacy) &&
+      legacy.version == kCalibrationVersionLegacy &&
+      legacy.check == calibrationCheckLegacy(legacy)) {
+    TouchCalibration candidate;
+    candidate.map = touch_ui::calibratedFromLegacy(
+        legacy.values[0], legacy.values[1], legacy.values[2],
+        legacy.values[3]);
+    candidate.pressure = legacy.values[4];
+    candidate.configured = true;
+    if (touch_ui::calibratedSpansValid(candidate.map) &&
         candidate.pressure >= kCapturePressure && candidate.pressure <= 120)
       touchCalibration_ = candidate;
   }
@@ -288,8 +318,11 @@ bool DisplayController::saveCalibration() {
   Preferences prefs;
   if (!prefs.begin("opencode-touch", false)) return false;
   StoredCalibration stored = {kCalibrationVersion,
-      {touchCalibration_.left, touchCalibration_.right, touchCalibration_.top,
-       touchCalibration_.bottom, touchCalibration_.pressure}, 0};
+      {static_cast<int16_t>(touchCalibration_.map.useRawXForX ? 1 : 0),
+       touchCalibration_.map.xStart, touchCalibration_.map.xEnd,
+       static_cast<int16_t>(touchCalibration_.map.useRawYForY ? 1 : 0),
+       touchCalibration_.map.yStart, touchCalibration_.map.yEnd,
+       touchCalibration_.pressure}, 0};
   stored.check = calibrationCheck(stored);
   const bool saved = prefs.putBytes("calib", &stored, sizeof(stored)) == sizeof(stored);
   prefs.end();
@@ -339,26 +372,29 @@ void DisplayController::calibrateTouch() {
     tft_.fillScreen(TFT_BLACK);
     tft_.setTextColor(TFT_WHITE, TFT_BLACK);
     tft_.drawString(label, 8, 8, 2);
-    tft_.drawString("Press cross with stylus", 8, 40, 2);
+    tft_.drawString("Press cross as usual", 8, 40, 2);
     tft_.fillRect(x - 10, y, 21, 1, TFT_YELLOW);
     tft_.fillRect(x, y - 10, 1, 21, TFT_YELLOW);
   };
   int16_t firstX = 0, firstY = 0, secondX = 0, secondY = 0;
-  int16_t firstPressure = 0, secondPressure = 0;
-  step("TOUCH 1/2", 24, 24);
+  int16_t thirdX = 0, thirdY = 0;
+  int16_t firstPressure = 0, secondPressure = 0, thirdPressure = 0;
+  step("TOUCH 1/3", touch_ui::kCalibTargetX0, touch_ui::kCalibTargetY0);
   const bool first = captureCalibrationPoint(firstX, firstY, firstPressure);
-  if (first) step("TOUCH 2/2", 295, 215);
+  if (first) step("TOUCH 2/3", touch_ui::kCalibTargetX1, touch_ui::kCalibTargetY0);
   const bool second = first && captureCalibrationPoint(secondX, secondY,
                                                        secondPressure);
-  if (second && abs(secondY - firstY) > 1000 &&
-      abs(secondX - firstX) > 1000) {
+  if (second) step("TOUCH 3/3", touch_ui::kCalibTargetX0, touch_ui::kCalibTargetY1);
+  const bool third = second && captureCalibrationPoint(thirdX, thirdY,
+                                                       thirdPressure);
+  const touch_ui::CalibratedMap measured = touch_ui::buildCalibratedMap(
+      touch_ui::RawXY(firstX, firstY), touch_ui::RawXY(secondX, secondY),
+      touch_ui::RawXY(thirdX, thirdY));
+  if (third && touch_ui::calibratedSpansValid(measured)) {
     const TouchCalibration previous = touchCalibration_;
-    touchCalibration_.left = firstY;
-    touchCalibration_.right = secondY;
-    touchCalibration_.top = firstX;
-    touchCalibration_.bottom = secondX;
+    touchCalibration_.map = measured;
     touchCalibration_.pressure = touch_ui::pressureThresholdFor(
-        std::min(firstPressure, secondPressure));
+        std::min({firstPressure, secondPressure, thirdPressure}));
     touchCalibration_.configured = true;
     if (!saveCalibration()) {
       touchCalibration_ = previous;
