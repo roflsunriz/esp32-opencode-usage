@@ -906,7 +906,9 @@ bool DisplayController::updatePollCountdown(uint32_t remainingMs,
     return false;
   }
   pollCountdownSec_ = seconds;
-  if (hasPresentedScreen_ && activeTab_ == touch_ui::Tab::kUsage) {
+  // The footer shows the countdown on both tabs, so refresh whichever tab
+  // is visible. The diff transfer only sends the changed footer band.
+  if (hasPresentedScreen_) {
     presentScreen();
   }
   return true;
