@@ -124,6 +124,13 @@ private:
   touch_ui::ReleaseLatch touchLatch_;
   touch_ui::ActionKind lastDragKind_ = touch_ui::ActionKind::kNone;
   uint32_t lastDragValue_ = 0;
+  // Whole-content drag scrolling: the tap that starts a contact fixes the
+  // gesture mode (slider adjust, scrollbar jump, or relative scroll).
+  bool dragActive_ = false;
+  touch_ui::ActionKind dragMode_ = touch_ui::ActionKind::kNone;
+  int16_t dragStartX_ = 0;
+  int16_t dragStartY_ = 0;
+  int16_t dragStartScroll_ = 0;
   boot_button::Model bootButton_;
   uint32_t pendingBootClicks_ = 0;
   uint32_t pendingBootCalibrations_ = 0;

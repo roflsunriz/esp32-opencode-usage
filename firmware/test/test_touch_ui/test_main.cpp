@@ -184,6 +184,20 @@ void test_slider_rows_hit_test_with_content_coordinates() {
                         touch_ui::clampScroll(9999));
 }
 
+void test_scrollbar_drag_tracks_finger_proportionally() {
+  TEST_ASSERT_EQUAL_INT(
+      0, touch_ui::displayScrollFromTrackY(touch_ui::kScrollBarY0));
+  TEST_ASSERT_EQUAL_INT(
+      touch_ui::kDisplayScrollMax,
+      touch_ui::displayScrollFromTrackY(touch_ui::kScrollBarY1));
+  const int16_t middle =
+      (touch_ui::kScrollBarY0 + touch_ui::kScrollBarY1) / 2;
+  const int16_t offset = touch_ui::displayScrollFromTrackY(middle);
+  TEST_ASSERT_TRUE(offset > 0);
+  TEST_ASSERT_TRUE(offset < touch_ui::kDisplayScrollMax);
+  TEST_ASSERT_EQUAL_INT(0, touch_ui::displayScrollFromTrackY(-100));
+}
+
 void test_latches_each_contact_until_penirq_is_high_for_twenty_ms() {
   touch_ui::ReleaseLatch latch;
   TEST_ASSERT_TRUE(latch.accept());
@@ -258,6 +272,7 @@ int runTests() {
   RUN_TEST(test_latches_each_contact_until_penirq_is_high_for_twenty_ms);
   RUN_TEST(test_slider_value_round_trips_with_track_ends);
   RUN_TEST(test_slider_rows_hit_test_with_content_coordinates);
+  RUN_TEST(test_scrollbar_drag_tracks_finger_proportionally);
   RUN_TEST(test_switches_tabs_only_in_the_header);
   RUN_TEST(test_display_tab_routes_sliders_and_scrollbar);
   return UNITY_END();

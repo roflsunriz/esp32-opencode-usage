@@ -415,24 +415,61 @@ bool DisplayController::pollTouch(TouchEvent &event) {
   touchWakePending_ = false;
   portEXIT_CRITICAL(&backlightMux_);
   if (!pending) {
-    // Drag continuation: while a contact persists on the Display tab,
-    // report slider value changes without waiting for release, so a pen
-    // pressed against the screen can drag a slider. Only quantized value
-    // changes are reported, and the latch still guards the next contact.
+    // Drag continuation: while a contact persists on the Display tab, the
+    // gesture mode fixed at tap time decides the mapping. Slider rows
+    // adjust their value, the scrollbar jumps proportionally, and anywhere
+    // else scrolls the whole content relatively.
     if (!penLow) {
       lastDragKind_ = touch_ui::ActionKind::kNone;
+      dragActive_ = false;
+      dragMode_ = touch_ui::ActionKind::kNone;
     } else if (touchLatch_.isLatched() && backlightOn() &&
                activeTab_ == touch_ui::Tab::kDisplay) {
       touch_ui::Point dragPoint;
       if (readTouchPoint(dragPoint)) {
         wakeBacklight();
-        const touch_ui::Action dragAction = touch_ui::hitTest(
-            activeTab_, dragPoint.x, dragPoint.y, displayScroll_);
-        if ((dragAction.kind == touch_ui::ActionKind::kSleepMinutes ||
-             dragAction.kind == touch_ui::ActionKind::kSleepHours ||
-             dragAction.kind == touch_ui::ActionKind::kPollInterval) &&
-            (dragAction.kind != lastDragKind_ ||
-             dragAction.timeoutSec != lastDragValue_)) {
+        if (!dragActive_) {
+          dragActive_ = true;
+          dragMode_ = touch_ui::ActionKind::kNone;
+          dragStartX_ = dragPoint.x;
+          dragStartY_ = dragPoint.y;
+          dragStartScroll_ = displayScroll_;
+        }
+        touch_ui::Action dragAction;
+        if (dragMode_ == touch_ui::ActionKind::kSleepMinutes ||
+            dragMode_ == touch_ui::ActionKind::kSleepHours ||
+            dragMode_ == touch_ui::ActionKind::kPollInterval) {
+          uint32_t minV = 0, maxV = 1, step = 1;
+          if (dragMode_ == touch_ui::ActionKind::kSleepMinutes) {
+            maxV = backlight_timer::kSleepMinutesMax;
+          } else if (dragMode_ == touch_ui::ActionKind::kSleepHours) {
+            maxV = backlight_timer::kSleepHoursMax;
+          } else {
+            minV = backlight_timer::kPollSliderMinSec;
+            maxV = backlight_timer::kPollSliderMaxSec;
+            step = backlight_timer::kPollSliderStepSec;
+          }
+          dragAction = touch_ui::Action(
+              dragMode_,
+              touch_ui::sliderValueFromX(dragPoint.x, minV, maxV, step));
+        } else if (dragMode_ == touch_ui::ActionKind::kDisplayScroll) {
+          dragAction = touch_ui::Action(
+              touch_ui::ActionKind::kDisplayScroll,
+              static_cast<uint32_t>(
+                  touch_ui::displayScrollFromTrackY(dragPoint.y)));
+        } else {
+          const int16_t delta =
+              static_cast<int16_t>(dragStartY_ - dragPoint.y);
+          if (delta < 6 && delta > -6) {
+            return false;
+          }
+          dragAction = touch_ui::Action(
+              touch_ui::ActionKind::kDisplayScroll,
+              static_cast<uint32_t>(touch_ui::clampScroll(
+                  static_cast<int32_t>(dragStartScroll_) + delta)));
+        }
+        if (dragAction.kind != lastDragKind_ ||
+            dragAction.timeoutSec != lastDragValue_) {
           lastDragKind_ = dragAction.kind;
           lastDragValue_ = dragAction.timeoutSec;
           event.kind = TouchEventKind::kTap;
@@ -460,6 +497,8 @@ bool DisplayController::pollTouch(TouchEvent &event) {
   if (!readTouchPoint(event.point)) {
     // A real contact that failed validation still wakes a sleeping screen,
     // but it is not a tap.
+    dragActive_ = false;
+    dragMode_ = touch_ui::ActionKind::kNone;
     if (wasOff) {
       wakeBacklight();
     }
@@ -468,15 +507,26 @@ bool DisplayController::pollTouch(TouchEvent &event) {
   wakeBacklight();
   if (wasOff) {
     event.kind = TouchEventKind::kWakeOnly;
+    dragActive_ = false;
+    dragMode_ = touch_ui::ActionKind::kNone;
     return true;
   }
   event.kind = TouchEventKind::kTap;
   event.hasCoordinates = true;
   event.action = touch_ui::hitTest(activeTab_, event.point.x, event.point.y,
                                    displayScroll_);
+  // Fix the drag gesture mode at tap time: slider rows and the scrollbar
+  // keep their own mapping while the contact continues, and taps anywhere
+  // else become relative whole-content scrolls.
+  dragActive_ = true;
+  dragMode_ = event.action.kind;
+  dragStartX_ = event.point.x;
+  dragStartY_ = event.point.y;
+  dragStartScroll_ = displayScroll_;
   if (event.action.kind == touch_ui::ActionKind::kSleepMinutes ||
       event.action.kind == touch_ui::ActionKind::kSleepHours ||
-      event.action.kind == touch_ui::ActionKind::kPollInterval) {
+      event.action.kind == touch_ui::ActionKind::kPollInterval ||
+      event.action.kind == touch_ui::ActionKind::kDisplayScroll) {
     lastDragKind_ = event.action.kind;
     lastDragValue_ = event.action.timeoutSec;
   } else {

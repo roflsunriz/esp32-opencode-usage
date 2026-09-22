@@ -383,6 +383,23 @@ inline Action hitTestDisplaySliders(int16_t x, int16_t contentY) {
   return Action();
 }
 
+// Maps a screen Y on the scrollbar track to a scroll offset, placing the
+// thumb center at the tap point. Used for drag scrolling.
+inline int16_t displayScrollFromTrackY(int16_t y) {
+  const int16_t trackH = kScrollBarY1 - kScrollBarY0;
+  const int16_t thumbH = static_cast<int16_t>(
+      (static_cast<int32_t>(kDisplayVisibleHeight) * trackH) /
+      kDisplayContentHeight);
+  const int16_t travel = trackH - thumbH;
+  if (travel <= 0 || kDisplayScrollMax <= 0) {
+    return 0;
+  }
+  const int32_t offset = (static_cast<int32_t>(y - thumbH / 2) -
+                          kScrollBarY0) *
+                         kDisplayScrollMax / travel;
+  return clampScroll(offset);
+}
+
 inline Action hitTestDisplayTab(uint16_t x, uint16_t y, int16_t scroll) {
   const int16_t clamped = clampScroll(scroll);
   // Scrollbar first so it wins over the slider thumb end zone.
