@@ -663,8 +663,9 @@ void DisplayController::drawDisplaySettings(TFT_eSPI &surface,
   auto drawSlider = [&](int16_t centerY, uint32_t value, uint32_t minV,
                         uint32_t maxV) {
     const int16_t y = contentY(centerY);
-    if (y < touch_ui::kTabHeight - 8 ||
-        y > touch_ui::kFooterTop + 8) {
+    // Keep the tab header (0..40) and footer (228..240) free from scrolled
+    // content: skip unless the whole thumb fits in the content area.
+    if (y < touch_ui::kTabHeight + 8 || y > kFooterTop - 9) {
       return;
     }
     surface.drawRect(touch_ui::kSliderTrackX0, y - 2,
@@ -681,7 +682,7 @@ void DisplayController::drawDisplaySettings(TFT_eSPI &surface,
   auto drawLine = [&](int16_t y, const char *text, uint16_t color) {
     const int16_t visible = contentY(y);
     if (visible < touch_ui::kTabHeight ||
-        visible > touch_ui::kFooterTop - 10) {
+        visible > kFooterTop - 10) {
       return;
     }
     drawTextClipped(surface, text, 6, visible, 1, color,
