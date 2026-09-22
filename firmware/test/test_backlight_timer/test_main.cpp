@@ -37,6 +37,20 @@ void test_sleep_parts_round_trip() {
   TEST_ASSERT_FALSE(backlight_timer::isValidPollSlider(601));
 }
 
+void test_zero_timeout_never_expires() {
+  backlight_timer::Model timer;
+  timer.start(0, 1000);
+  TEST_ASSERT_TRUE(timer.isOn());
+  TEST_ASSERT_FALSE(timer.tick(UINT32_MAX));
+  TEST_ASSERT_TRUE(timer.isOn());
+  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, timer.remainingMs(12345));
+  // Changing the timeout while on reports no power-state change.
+  TEST_ASSERT_FALSE(timer.setTimeout(0, 20000));
+  TEST_ASSERT_EQUAL_UINT32(0, timer.timeoutSec());
+  TEST_ASSERT_TRUE(timer.isOn());
+  TEST_ASSERT_FALSE(timer.tick(20000));
+}
+
 void test_turns_off_at_the_exact_timeout_boundary() {
   backlight_timer::Model timer;
   timer.start(15, 1000);
@@ -88,6 +102,7 @@ int runTests() {
   UNITY_BEGIN();
   RUN_TEST(test_accepts_legacy_choices_and_slider_range);
   RUN_TEST(test_sleep_parts_round_trip);
+  RUN_TEST(test_zero_timeout_never_expires);
   RUN_TEST(test_turns_off_at_the_exact_timeout_boundary);
   RUN_TEST(test_wraparound_keeps_the_deadline_correct);
   RUN_TEST(test_wake_and_timeout_change_reset_the_deadline);

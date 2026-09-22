@@ -81,8 +81,9 @@ public:
   }
 
   // Network/display updates intentionally do not call wake().
+  // A timeout of 0 disables the auto-off (always on) and never expires.
   bool tick(uint32_t nowMs) {
-    if (!on_ || elapsedMs(nowMs) < timeoutMs()) {
+    if (!on_ || timeoutSec_ == 0 || elapsedMs(nowMs) < timeoutMs()) {
       return false;
     }
     on_ = false;
@@ -95,6 +96,9 @@ public:
   uint32_t remainingMs(uint32_t nowMs) const {
     if (!on_) {
       return 0;
+    }
+    if (timeoutSec_ == 0) {
+      return UINT32_MAX;
     }
     const uint32_t elapsed = elapsedMs(nowMs);
     const uint32_t timeout = timeoutMs();
