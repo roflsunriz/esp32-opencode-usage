@@ -94,8 +94,6 @@ export class UsageService {
       );
     const client = new OpenCodeClient(session.cookie, session.workspace);
     await client.usage();
-    const queryId = client.cachedQueryId();
-    if (!queryId) throw new Error("公式の取得先を確認できませんでした。");
     await this.device.send({
       version: 1,
       type: "config",
@@ -105,7 +103,9 @@ export class UsageService {
         settings.backlightTimeoutSec ?? defaultBacklightTimeout,
       authCookie: session.cookie,
       workspace: session.workspace,
-      queryId,
+      // 直接取得は本体がGET /console/api/go/statusへ接続し、
+      // 取得先IDを使わない。USB設定形式の互換のため空文字を送る。
+      queryId: "",
     });
   }
 

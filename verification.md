@@ -1,5 +1,16 @@
 # 検証
 
+## コンソール移行への追従（2026-09-22、実機検証済み）
+
+公式Goコンソールが `/console` 配下へ移行し、`/_server`・Seroval・`auth` Cookieが廃止された。`GET /console/api/go/status`（`x-org-id` ヘッダー・`__Host-console_session`）の `access.meters`（`fiveHour`/`week`/`month`、`limitMicroCents`/`usedMicroCents`）へPCとESP32を移行した。金額は1セント=1,000,000 microCents（1ドル=100,000,000）で換算し、使用率は `used/limit*100`、リセットは `resetsAt`（月間は `access.endsAt`）から求める。
+
+- ホスト41件・native 36件・ESP32ビルド・CA照合・`bun audit`（脆弱性なし）・mypy strict・ruff整形が成功した。
+- 実セッションでPCの取得を実測し、月間66〜67%が公式表示と一致することを確認した。
+- COM7基板（ESP32-D0WD-V3・4MB）へNVS保持のupload方式で書き込み、旧 `auth=` 記録の破棄と初期設定画面への復帰を確認した。PC操作画面から再ログイン・再保存し、ESP32の直接更新（`lastDirectUpdate`）を確認した。
+- 実機LCDのUSB読出しで5H `$0.47 / $12.00`・WEEK `$0.47 / $30.00`・MONTH `$40.24 / $60.00` と `OpenCode updated` を画像確認した（`.private/lcd-console-api.png`、数値は実測値）。
+- 旧認証はサーバー側で無効のため、更新後は再ログインと再保存が1回必要になる。旧記録は本体起動時に破棄する。
+- 全フラッシュ退避は `.private/backups/before-console-api-20260922d.bin` に保存し、`verify-flash` のdigest一致を確認した。退避時は `--after no_reset` で読み出し後にリセットさせず、そのまま `--before no_reset` で照合した。Wi-Fi接続中の再起動はDHCP取得IPなどをNVSへ書き戻すため、リセットを挟むとdigestが合わなくなる。
+
 ## v0.2.2リリース（2026-09-16）
 
 `package.json` を0.2.2に上げ、`Unreleased` を `## [0.2.2] - 2026-09-16` に移した（重複していたFixed節を統合）。公開前にホスト検査40件・native 36件・ESP32ビルド・CA照合・`bun audit`（脆弱性なし）・mypy strict・ruff整形が成功し、mainのCI成功後に未使用の `v0.2.2` タグを公開した。検証記録の追加コミット後のCIはDPAPI制限時間とUSB worker起動の3件で失敗したが、同一コードの再実行で成功し、 runner側の一時的な失敗と確認した。Releaseワークフローは成功し、公開ノートがCHANGELOGの0.2.2節と一致することを確認した。4成果物を展開し、ホストZIPの `start.cmd`・USB worker・`lib/sensitive-xpt2046`・版数0.2.2、ファームウェアZIPの個別イメージと `firmware-full.bin`（0x10000のアプリ領域一致・ESP32 magic確認）・同梱ドライバー、秘密情報やキャッシュを含まないことを確認した。

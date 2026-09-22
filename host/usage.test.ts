@@ -6,90 +6,132 @@ import {
 } from "./usage.ts";
 
 const sample = {
-  rollingUsage: {
-    usage: 0,
-    limit: 1_200_000_000,
-    usagePercent: 0,
-    resetInSec: 18000,
-  },
-  weeklyUsage: {
-    usage: 24_876_543,
-    limit: 3_000_000_000,
-    usagePercent: 0.8,
-    resetInSec: 400000,
-  },
-  monthlyUsage: {
-    usage: 2_640_123_456,
-    limit: 6_000_000_000,
-    usagePercent: 44,
-    resetInSec: 2000000,
+  access: {
+    endsAt: "2026-10-02T22:58:39.000Z",
+    meters: {
+      fiveHour: {
+        startsAt: "2026-09-22T06:34:36.282Z",
+        resetsAt: "2026-09-22T11:34:36.282Z",
+        limitMicroCents: "1200000000",
+        usedMicroCents: "3647255",
+      },
+      week: {
+        startsAt: "2026-09-21T00:00:00.000Z",
+        resetsAt: "2026-09-28T00:00:00.000Z",
+        limitMicroCents: "3000000000",
+        usedMicroCents: "3647255",
+      },
+      month: {
+        limitMicroCents: "6000000000",
+        usedMicroCents: "3980909783",
+      },
+    },
   },
 };
+// 2026-09-22T06:34:36.282Z と同じ瞬間。fiveHour の残りはちょうど5時間。
+const now = Date.parse("2026-09-22T06:34:36.282Z");
 
 describe("official usage", () => {
-  test("converts all three periods without deriving dollars from rounded percentages", () => {
-    const frame = normalizeUsage(sample, 1_000_000);
-    expect(frame.weekly.used).toBe(0.24876543);
-    expect(frame.monthly.used).toBe(26.40123456);
+  test("converts all three meters from microCents to dollars", () => {
+    const frame = normalizeUsage(sample, now);
+    expect(frame.rolling.used).toBeCloseTo(0.03647255, 6);
     expect(frame.rolling.limit).toBe(12);
+    expect(frame.rolling.percent).toBeCloseTo(0.3039, 3);
+    expect(frame.rolling.resetInSec).toBe(18000);
     expect(frame.weekly.limit).toBe(30);
+    expect(frame.monthly.used).toBeCloseTo(39.80909783, 6);
     expect(frame.monthly.limit).toBe(60);
-    expect(frame.updatedAt).toBe(1000);
+    expect(frame.monthly.percent).toBeCloseTo(66.348, 2);
+    // 月間は契約の endsAt まで: 10日16時間24分02.718秒の切り上げ。
+    expect(frame.monthly.resetInSec).toBe(923043);
+    expect(frame.updatedAt).toBe(Math.floor(now / 1000));
   });
 
-  test("allows legitimate exhausted and increased quotas", () => {
-    const frame = normalizeUsage({
-      ...sample,
-      rollingUsage: {
-        usage: 2_401_000_000,
-        limit: 2_400_000_000,
-        usagePercent: 100,
-        resetInSec: 0,
+  test("allows legitimate exhausted quotas", () => {
+    const frame = normalizeUsage(
+      {
+        access: {
+          endsAt: new Date(now).toISOString(),
+          meters: {
+            fiveHour: {
+              resetsAt: new Date(now).toISOString(),
+              limitMicroCents: "2400000000",
+              usedMicroCents: "2401000000",
+            },
+            week: {
+              resetsAt: new Date(now).toISOString(),
+              limitMicroCents: 3000000000,
+              usedMicroCents: 0,
+            },
+            month: {
+              limitMicroCents: 6000000000,
+              usedMicroCents: 6000000000,
+            },
+          },
+        },
       },
-    });
+      now,
+    );
     expect(frame.rolling.limit).toBe(24);
     expect(frame.rolling.used).toBe(24.01);
+    expect(frame.rolling.resetInSec).toBe(0);
   });
 
   test.each([
     null,
     {},
-    { ...sample, weeklyUsage: null },
-    { ...sample, monthlyUsage: { ...sample.monthlyUsage, limit: 0 } },
-    { ...sample, rollingUsage: { ...sample.rollingUsage, usage: -1 } },
-    { ...sample, weeklyUsage: { ...sample.weeklyUsage, usagePercent: 99 } },
+    { ...sample, access: null },
+    { access: {} },
+    {
+      access: { ...sample.access, meters: null },
+    },
+    {
+      access: {
+        ...sample.access,
+        meters: { ...sample.access.meters, week: null },
+      },
+    },
+    {
+      access: {
+        ...sample.access,
+        meters: {
+          ...sample.access.meters,
+          month: { ...sample.access.meters.month, limitMicroCents: "0" },
+        },
+      },
+    },
+    {
+      access: {
+        ...sample.access,
+        meters: {
+          ...sample.access.meters,
+          fiveHour: {
+            ...sample.access.meters.fiveHour,
+            usedMicroCents: "-1",
+          },
+        },
+      },
+    },
+    {
+      access: {
+        ...sample.access,
+        meters: {
+          ...sample.access.meters,
+          week: { ...sample.access.meters.week, resetsAt: "not-a-date" },
+        },
+      },
+    },
   ])("rejects invalid or incomplete snapshots %#", (input) => {
     expect(() => normalizeUsage(input)).toThrow();
-  });
-
-  test("reads current Seroval response without evaluating any script", () => {
-    const records = Object.entries(sample)
-      .map(
-        ([key, value], index) =>
-          `${key}:$R[${index}]={status:"ok",${Object.entries(value)
-            .map(([k, v]) => `${k}:${v}`)
-            .join(",")}}`,
-      )
-      .join(",");
-    const text = `;0x000001ff;(($R)=>({${records}}))($R);throw Error('must not execute')`;
-    expect(
-      normalizeUsage(decodeUsageResponse(text, "text/javascript")).monthly.used,
-    ).toBe(26.40123456);
-    expect(() => decodeUsageResponse(text + text, "text/javascript")).toThrow();
-    expect(() =>
-      decodeUsageResponse(
-        text.replace("usage:0", "usage:evil()"),
-        "text/javascript",
-      ),
-    ).toThrow();
   });
 
   test("accepts JSON while rejecting HTML and unknown serialization", () => {
     expect(
       normalizeUsage(
         decodeUsageResponse(JSON.stringify(sample), "application/json"),
-      ).weekly.percent,
-    ).toBe(0.8);
+        now,
+      ).weekly.limit,
+    ).toBe(30);
     expect(() =>
       decodeUsageResponse("<html>login</html>", "text/html"),
     ).toThrow();

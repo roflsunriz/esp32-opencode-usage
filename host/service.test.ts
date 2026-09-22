@@ -12,7 +12,7 @@ const frame: UsageFrame = {
 };
 const session = {
   version: 1 as const,
-  cookie: "auth=test",
+  cookie: "__Host-console_session=test",
   workspace: "wrk_0123456789ABCDEF",
 };
 

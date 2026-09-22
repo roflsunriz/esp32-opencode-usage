@@ -104,7 +104,6 @@ void emitTransportDiagnostic(
 void NetworkClient::setConfig(const config_store::WiFiConfig &config) {
   copyConfig(config_, config);
   configured_ = config_.enabled;
-  opencode_.setCachedQueryId(config_.queryId);
   memset(usagePayload_, 0, sizeof(usagePayload_));
   nextConnectAttemptMs_ = 0;
   nextTimeSyncAttemptMs_ = 0;

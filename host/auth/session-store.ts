@@ -29,7 +29,7 @@ function isWorkspace(value: string): boolean {
 }
 
 function isCookie(value: string): boolean {
-  return /^auth=[^\r\n;]+$/.test(value);
+  return /^__Host-console_session=[^\r\n;]+$/.test(value);
 }
 
 function asSession(value: unknown): StoredSession | undefined {

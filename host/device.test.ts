@@ -96,7 +96,7 @@ test("credentials are never sent to a device without the setup firmware handshak
         enabled: true,
         ssid: "test",
         password: "testpass",
-        authCookie: "auth=must-stay-on-host",
+        authCookie: "__Host-console_session=must-stay-on-host",
         workspace: "wrk_0123456789",
         queryId: "a".repeat(64),
         pollIntervalSec: 60,

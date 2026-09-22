@@ -1,29 +1,29 @@
 # 取得方式と通信仕様
 
-確認日: 2026-09-09
+確認日: 2026-09-22
 
-この文書は、Windows PCで初回設定を行い、その後ESP32が公式HTTPSサービスから直接使用量を取得する構成を定義します。PCは認証情報と動的な取得先を準備する初期設定端末です。通常運用の使用量取得にPC中継は使いません。
+この文書は、Windows PCで初回設定を行い、その後ESP32が公式HTTPSサービスから直接使用量を取得する構成を定義します。PCは認証情報を準備する初期設定端末です。通常運用の使用量取得にPC中継は使いません。
 
 ## PC側の公式データ取得
 
-PCの `OpenCodeClient` は、認証済みの公式Goページが読み込むJavaScriptから、デプロイごとに変わる `queryLiteSubscription_query` の取得先IDを検出します。固定された関数IDを埋め込まず、取得できない形式は成功扱いにしません。
+PCとESP32の `OpenCodeClient` は、コンソールの使用量API `GET /console/api/go/status` へ、ワークスペースIDを `x-org-id` ヘッダーに付けて取得します。認証はコンソールのセッションCookie（`__Host-console_session=`）を使い、旧来の `auth` Cookieでは取得できません（401）。固定の取得先IDやページ資産の解析は行いません。
 
-公式応答から次の3期間を読み取ります。
+公式応答の `access.meters` から次の3期間を読み取ります。
 
-- `rollingUsage`
-- `weeklyUsage`
-- `monthlyUsage`
+- `fiveHour`（5時間・表示名rolling）
+- `week`（週間・表示名weekly）
+- `month`（月間・表示名monthly）
 
-各期間には `usage`、`limit`、`usagePercent`、`resetInSec` が含まれます。金額の単位は1ドル=100,000,000単位です。`usagePercent` は公式の丸め値をそのまま使い、丸めた割合から金額を逆算しません。欠損、負値、非有限値、0の上限、金額と割合の不整合は拒否します。
+各期間には `limitMicroCents`、`usedMicroCents` が含まれます。金額の単位は1セント=1,000,000 microCents、すなわち1ドル=100,000,000 microCentsです。使用率は `used/limit*100` で計算します。`fiveHour` と `week` のリセット時刻は各メーターの `resetsAt`（ISO8601 UTC）、`month` は `access.endsAt` から求めます。欠損、負値、非有限値、0の上限、不正な時刻は拒否し、0%として表示しません。
 
-現在の応答はJavaScript形式のSerovalストリームです。外部コードを `eval` せず、必要な数値レコードだけを厳格に読み取ります。
+応答は `application/json` です。旧来の `/_server` へのPOSTやSerovalストリームは2026-09-22に公式コンソールから廃止されたため使いません。
 
 ## 初期設定フロー
 
-1. PCで公式GitHub/Googleログインを完了し、認証CookieをWindows DPAPIで保存する。
-2. PCが公式ページから使用量を取得し、ワークスペースと動的な取得先IDを確定する。
+1. PCで公式GitHub/Googleログインを完了し、コンソールのセッションCookieをWindows DPAPIで保存する。
+2. PCが使用量APIから使用量を取得し、ワークスペースを確定する。
 3. USBシリアルでESP32へ `config` フレームを送り、保存完了ACKを待つ。
-4. ESP32が保存した認証Cookie、ワークスペース、取得先IDを使って公式HTTPSサービスへ直接接続する。
+4. ESP32が保存したセッションCookieとワークスペースを使って公式HTTPSサービスへ直接接続する。
 5. ESP32が取得した使用量をLCDへ表示し、PC画面には直接更新確認を表示する。
 
 2026-09-09に、正しいGTS Root R4＋GlobalSign Root CAの信頼束を使ったHTTPS取得、NTP同期、再起動後の認証保持、PC設定アプリ停止中の継続更新を実機確認しました。
@@ -39,9 +39,9 @@ USBは115200 baud、1行につき1つのJSONです。設定フレームのフィ
 | `enabled`         | boolean         | ESP32の直接取得を有効にするか                              |
 | `ssid`            | 64バイト未満    | Wi-Fi SSID                                                 |
 | `password`        | 65バイト未満    | Wi-Fiパスワード。空文字はオープンネットワーク用            |
-| `authCookie`      | 4097バイト未満  | `auth=`で始まるOpenCode認証Cookie                          |
+| `authCookie`      | 4097バイト未満  | `__Host-console_session=`で始まるコンソールのセッションCookie |
 | `workspace`       | 96バイト未満    | `wrk_`で始まるワークスペースID                             |
-| `queryId`         | 65バイト未満    | 公式ページから検出した64桁の取得先ID。再検出時は空にできる |
+| `queryId`         | 65バイト未満    | 互換保持の予備欄。常に空文字を送り、本体は無視する         |
 | `pollIntervalSec` | 15〜86400       | 取得間隔（秒）                                             |
 | `requestId`       | 16桁の小文字hex | 保存ACKを要求する相関ID                                    |
 
@@ -106,7 +106,7 @@ workerは `open`、`data`、`written`、`error`、`close` を返します。書�
 
 ## 保存とセキュリティ
 
-ESP32のNVSはスキーマ4とCRC付きの単一レコードで設定を保存します。認証Cookie、Wi-Fiパスワード、ワークスペース、取得先IDはNVSに残ります。通常のESP32フラッシュは暗号化されていないため、物理機器と全フラッシュバックアップを秘密情報として扱います。
+ESP32のNVSはスキーマ4とCRC付きの単一レコードで設定を保存します。認証Cookie、Wi-Fiパスワード、ワークスペースはNVSに残ります。通常のESP32フラッシュは暗号化されていないため、物理機器と全フラッシュバックアップを秘密情報として扱います。
 
 PC側の認証CookieはWindows DPAPIで保護します。PCのlogoutはPC側セッションだけを削除し、ESP32の保存情報は消しません。ESP32側を消去する場合はUSB接続した初期設定画面の削除操作を使います。
 
@@ -116,7 +116,7 @@ MOSI=13、MISO=12、SCLK=14、CS=15、DC=2、BL=21、RST=-1。ILI9341の描画�
 
 一次資料:
 
-- [公式Go画面](https://opencode.ai/go)
+- [公式コンソール](https://opencode.ai/console)（ログイン済みであること）
 - [pySerial公式リポジトリ](https://github.com/pyserial/pyserial)
 - [pySerial公式ドキュメント](https://pyserial.readthedocs.io/en/latest/)
 - [Adafruit ILI9341](https://github.com/adafruit/Adafruit_ILI9341)

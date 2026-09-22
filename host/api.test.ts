@@ -2,75 +2,49 @@ import { describe, expect, test } from "bun:test";
 import { OpenCodeClient } from "./api.ts";
 
 const workspace = "wrk_0123456789ABCDEF";
-const query = "a".repeat(64);
-const sample = Object.fromEntries(
-  ["rolling", "weekly", "monthly"].map((key) => [
-    `${key}Usage`,
-    {
-      usage: 100000000,
-      limit: 1000000000,
-      usagePercent: 10,
-      resetInSec: 18000,
+const cookie = "__Host-console_session=test";
+const sample = {
+  access: {
+    endsAt: "2026-10-02T22:58:39.000Z",
+    meters: {
+      fiveHour: {
+        startsAt: "2026-09-22T06:34:36.282Z",
+        resetsAt: "2026-09-22T11:34:36.282Z",
+        limitMicroCents: "1200000000",
+        usedMicroCents: "3647255",
+      },
+      week: {
+        startsAt: "2026-09-21T00:00:00.000Z",
+        resetsAt: "2026-09-28T00:00:00.000Z",
+        limitMicroCents: "3000000000",
+        usedMicroCents: "3647255",
+      },
+      month: {
+        limitMicroCents: "6000000000",
+        usedMicroCents: "3980909783",
+      },
     },
-  ]),
-);
+  },
+};
 
 describe("OpenCode transport", () => {
-  test("discovers the deployed query, sends typed args, and caches within a session", async () => {
+  test("fetches go status with the session cookie and org header", async () => {
     const calls: { url: string; init?: RequestInit }[] = [];
     const fake = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       calls.push({ url, init });
-      if (url.endsWith("/go"))
-        return new Response(
-          '<link href="/_build/assets/index-deployed.js"><script src="https://evil.invalid/index-bad.js"></script>',
-        );
-      if (url.endsWith(".js"))
-        return new Response(
-          `const queryLiteSubscription_query = createServerReference("${query}");`,
-        );
       return Response.json(sample);
     }) as typeof fetch;
-    const client = new OpenCodeClient("auth=test", workspace, fake);
-    expect((await client.usage()).rolling.used).toBe(1);
-    await client.usage();
-    expect(calls.map((call) => call.url)).toEqual([
-      `https://opencode.ai/workspace/${workspace}/go`,
-      "https://opencode.ai/_build/assets/index-deployed.js",
-      "https://opencode.ai/_server",
-      "https://opencode.ai/_server",
-    ]);
-    const init = calls[2]?.init;
-    expect(init?.redirect).toBe("manual");
-    expect(new Headers(init?.headers).get("X-Server-Id")).toBe(query);
-    expect(new Headers(init?.headers).get("Cookie")).toBe("auth=test");
-    expect(JSON.parse(String(init?.body)).t.a[0].s).toBe(workspace);
-  });
-
-  test("refreshes a changed deployment once and does not retry indefinitely", async () => {
-    let assetCount = 0;
-    let queryCount = 0;
-    const fake = (async (input: string | URL | Request) => {
-      const url = String(input);
-      if (url.endsWith("/go"))
-        return new Response('<link href="/_build/assets/index-current.js">');
-      if (url.endsWith(".js")) {
-        assetCount++;
-        return new Response(
-          `const queryLiteSubscription_query = f("${query}");`,
-        );
-      }
-      queryCount++;
-      return queryCount === 1
-        ? new Response("not found", { status: 404 })
-        : Response.json(sample);
-    }) as typeof fetch;
-    expect(
-      (await new OpenCodeClient("auth=test", workspace, fake).usage()).monthly
-        .limit,
-    ).toBe(10);
-    expect(assetCount).toBe(2);
-    expect(queryCount).toBe(2);
+    const frame = await new OpenCodeClient(cookie, workspace, fake).usage();
+    expect(frame.rolling.used).toBeCloseTo(0.03647255, 6);
+    expect(frame.rolling.limit).toBe(12);
+    expect(frame.monthly.limit).toBe(60);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("https://opencode.ai/console/api/go/status");
+    const headers = new Headers(calls[0]?.init?.headers);
+    expect(headers.get("Cookie")).toBe(cookie);
+    expect(headers.get("x-org-id")).toBe(workspace);
+    expect(calls[0]?.init?.redirect).toBe("manual");
   });
 
   test("does not follow authentication redirects or forward credentials elsewhere", async () => {
@@ -83,27 +57,27 @@ describe("OpenCode transport", () => {
       });
     }) as unknown as typeof fetch;
     await expect(
-      new OpenCodeClient("auth=test", workspace, fake).usage(),
+      new OpenCodeClient(cookie, workspace, fake).usage(),
     ).rejects.toThrow("再ログイン");
     expect(count).toBe(1);
+    await expect(
+      new OpenCodeClient(
+        cookie,
+        workspace,
+        (async () =>
+          new Response(null, { status: 401 })) as unknown as typeof fetch,
+      ).usage(),
+    ).rejects.toThrow("再ログイン");
     expect(
       () => new OpenCodeClient("auth=test\r\nX-Bad: 1", workspace, fake),
     ).toThrow();
+    expect(() => new OpenCodeClient("auth=test", workspace, fake)).toThrow();
   });
 
   test("fails visibly for missing Go data instead of treating it as zero", async () => {
-    const fake = (async (input: string | URL | Request) => {
-      const url = String(input);
-      if (url.endsWith("/go"))
-        return new Response('<link href="/_build/assets/index-current.js">');
-      if (url.endsWith(".js"))
-        return new Response(
-          `const queryLiteSubscription_query = f("${query}");`,
-        );
-      return Response.json(null);
-    }) as typeof fetch;
+    const fake = (async () => Response.json(null)) as unknown as typeof fetch;
     await expect(
-      new OpenCodeClient("auth=test", workspace, fake).usage(),
+      new OpenCodeClient(cookie, workspace, fake).usage(),
     ).rejects.toThrow();
   });
 });

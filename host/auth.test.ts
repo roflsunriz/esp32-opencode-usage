@@ -67,10 +67,10 @@ const server = createServer((socket) => {
           result = { value: null };
           break;
         case "WebDriver:GetCurrentURL":
-          result = { value: selectedHandle === "go-tab" ? "https://opencode.ai/workspace/wrk_test/go" : "https://example.invalid/" };
+          result = { value: selectedHandle === "go-tab" ? "https://opencode.ai/console/wrk_test/go" : "https://example.invalid/" };
           break;
         case "WebDriver:GetCookies":
-          result = [{ name: "auth", value: "test-value", domain: "opencode.ai", expiry: 2000000000 }];
+          result = [{ name: "__Host-console_session", value: "test-value", domain: "opencode.ai", expiry: 2000000000 }];
           break;
       }
       socket.write(frame([1, request[1], null, result]));
@@ -214,7 +214,7 @@ describe("認証情報の保存", () => {
       const store = createSessionStore(directory, memoryProtector());
       const session: StoredSession = {
         version: 1,
-        cookie: "auth=test-value",
+        cookie: "__Host-console_session=test-value",
         workspace: "wrk_test",
         expiresAt: 2_000_000_000_000,
       };
@@ -249,7 +249,7 @@ describe("認証情報の保存", () => {
 });
 
 describe("Firefox Marionette の認証取得", () => {
-  test("既存 Firefox から opencode.ai の auth Cookie とワークスペースだけを取り込む", async () => {
+  test("既存 Firefox からコンソールのセッション Cookie とワークスペースだけを取り込む", async () => {
     const firefox = await fakeMarionette();
     try {
       await expect(
@@ -261,7 +261,7 @@ describe("Firefox Marionette の認証取得", () => {
         }),
       ).resolves.toEqual({
         version: 1,
-        cookie: "auth=test-value",
+        cookie: "__Host-console_session=test-value",
         workspace: "wrk_test",
         expiresAt: 2_000_000_000_000,
       });
@@ -282,18 +282,35 @@ describe("Firefox Marionette の認証取得", () => {
     }
   });
 
-  test("auth Cookie は opencode.ai ドメイン以外から受け取らない", () => {
+  test("セッション Cookie は opencode.ai ドメイン以外から受け取らない", () => {
     expect(
       extractAuthCookie([
-        { name: "auth", value: "test-value", domain: "example.invalid" },
+        {
+          name: "__Host-console_session",
+          value: "test-value",
+          domain: "example.invalid",
+        },
       ]),
     ).toBeUndefined();
     expect(
       extractAuthCookie([
-        { name: "auth", value: "test-value", domain: ".opencode.ai" },
+        {
+          name: "auth",
+          value: "test-value",
+          domain: ".opencode.ai",
+        },
+      ]),
+    ).toBeUndefined();
+    expect(
+      extractAuthCookie([
+        {
+          name: "__Host-console_session",
+          value: "test-value",
+          domain: ".opencode.ai",
+        },
       ]),
     ).toEqual({
-      cookie: "auth=test-value",
+      cookie: "__Host-console_session=test-value",
     });
   });
 });

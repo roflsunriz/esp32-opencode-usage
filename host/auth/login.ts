@@ -44,7 +44,7 @@ function delay(milliseconds: number): Promise<void> {
 
 function buildLoginUrl(workspace?: string): string {
   const url = new URL("/auth/authorize", loginOrigin);
-  if (workspace) url.searchParams.set("continue", `/workspace/${workspace}/go`);
+  if (workspace) url.searchParams.set("continue", `/console/${workspace}/go`);
   return url.toString();
 }
 
@@ -54,7 +54,9 @@ function workspaceFromUrl(value: unknown): string | undefined {
     const url = new URL(value);
     if (url.protocol !== "https:" || url.hostname !== "opencode.ai")
       return undefined;
-    const match = /^\/workspace\/([^/]+)(?:\/|$)/.exec(url.pathname);
+    const match = /^\/(?:console|workspace)\/([^/]+)(?:\/|$)/.exec(
+      url.pathname,
+    );
     if (!match?.[1]) return undefined;
     const workspace = decodeURIComponent(match[1]);
     return isWorkspace(workspace) ? workspace : undefined;
@@ -73,7 +75,7 @@ function isOpencodeUrl(value: unknown): boolean {
   }
 }
 
-/** `WebDriver:GetCookies` の応答から、opencode.ai 用の auth Cookie だけを選ぶ。 */
+/** `WebDriver:GetCookies` の応答から、コンソール用のセッション Cookie だけを選ぶ。 */
 export function extractAuthCookie(value: unknown): AuthCookie | undefined {
   const cookies = Array.isArray(value)
     ? value
@@ -85,7 +87,7 @@ export function extractAuthCookie(value: unknown): AuthCookie | undefined {
   for (const candidate of cookies) {
     if (
       !isRecord(candidate) ||
-      candidate.name !== "auth" ||
+      candidate.name !== "__Host-console_session" ||
       typeof candidate.value !== "string" ||
       typeof candidate.domain !== "string"
     ) {
@@ -107,8 +109,11 @@ export function extractAuthCookie(value: unknown): AuthCookie | undefined {
         : undefined;
     if (expiresAt !== undefined && expiresAt <= Date.now()) continue;
     return expiresAt === undefined
-      ? { cookie: `auth=${candidate.value}` }
-      : { cookie: `auth=${candidate.value}`, expiresAt };
+      ? { cookie: `__Host-console_session=${candidate.value}` }
+      : {
+          cookie: `__Host-console_session=${candidate.value}`,
+          expiresAt,
+        };
   }
   return undefined;
 }

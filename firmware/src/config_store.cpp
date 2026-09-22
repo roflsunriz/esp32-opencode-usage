@@ -192,8 +192,8 @@ bool validate(const WiFiConfig &config, char *error, size_t errorCapacity) {
     setError(error, errorCapacity, "ssid is required when WiFi is enabled");
     return false;
   }
-  if (strncmp(config.authCookie, "auth=", 5) != 0 ||
-      strlen(config.authCookie) <= 5 ||
+  if (strncmp(config.authCookie, "__Host-console_session=", 23) != 0 ||
+      strlen(config.authCookie) <= 23 ||
       strchr(config.authCookie, ';') != nullptr) {
     setError(error, errorCapacity, "OpenCode authentication is required");
     return false;

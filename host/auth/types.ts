@@ -1,6 +1,6 @@
 export interface StoredSession {
   readonly version: 1;
-  /** `auth=<value>` 形式の Cookie ヘッダー値。 */
+  /** `__Host-console_session=<value>` 形式の Cookie ヘッダー値。 */
   readonly cookie: string;
   readonly workspace: string;
   /** Unix epoch milliseconds。Cookie に有効期限がある場合だけ設定する。 */

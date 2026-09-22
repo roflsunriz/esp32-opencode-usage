@@ -8,67 +8,72 @@
 namespace {
 
 constexpr char kResponse[] =
-    ";0x000001ff;(($R)=>({rollingUsage:$R[2]={status:\"ok\","
-    "resetInSec:18000,usagePercent:0,usage:0,limit:1200000000},"
-    "weeklyUsage:$R[3]={status:\"ok\",resetInSec:400000,"
-    "usagePercent:0.8,usage:24876543,limit:3000000000},"
-    "monthlyUsage:$R[4]={status:\"ok\",resetInSec:2000000,"
-    "usagePercent:44,usage:2640123456,limit:6000000000}}))($R);"
-    "throw Error('the parser must not execute this');";
+    "{\"subscriberUserId\":\"acc_test\",\"access\":{"
+    "\"startsAt\":\"2026-09-02T22:58:39.000Z\","
+    "\"endsAt\":\"2026-10-02T22:58:39.000Z\","
+    "\"meters\":{\"fiveHour\":{\"startsAt\":\"2026-09-22T06:34:36.282Z\","
+    "\"resetsAt\":\"2026-09-22T11:34:36.282Z\",\"limitMicroCents\":"
+    "\"1200000000\",\"usedMicroCents\":\"3647255\"},"
+    "\"week\":{\"startsAt\":\"2026-09-21T00:00:00.000Z\","
+    "\"resetsAt\":\"2026-09-28T00:00:00.000Z\",\"limitMicroCents\":"
+    "\"3000000000\",\"usedMicroCents\":\"3647255\"},"
+    "\"month\":{\"limitMicroCents\":\"6000000000\",\"usedMicroCents\":"
+    "\"3980909783\"}}}}";
 
-void test_normalizes_all_three_seroval_windows_without_evaluation() {
+// 2026-09-22T06:34:36Z in epoch seconds.
+constexpr uint64_t kUpdatedAt = 1790058876ULL;
+
+void test_normalizes_all_three_console_meters() {
   char payload[opencode_client::kUsagePayloadCapacity] = {};
-  TEST_ASSERT_TRUE(opencode_client::normalizeSerovalUsage(
-      kResponse, strlen(kResponse), 1770000000, payload, sizeof(payload)));
+  TEST_ASSERT_TRUE(opencode_client::normalizeConsoleStatusUsage(
+      kResponse, strlen(kResponse), kUpdatedAt, payload, sizeof(payload)));
   TEST_ASSERT_NOT_NULL(strstr(payload, "\"version\":1"));
-  TEST_ASSERT_NOT_NULL(strstr(payload, "\"updatedAt\":1770000000"));
-  TEST_ASSERT_NOT_NULL(strstr(payload, "\"used\":0.24876543"));
-  TEST_ASSERT_NOT_NULL(strstr(payload, "\"percent\":0.8"));
-  TEST_ASSERT_NOT_NULL(strstr(payload, "\"resetInSec\":2000000"));
+  TEST_ASSERT_NOT_NULL(strstr(payload, "\"updatedAt\":1790058876"));
+  TEST_ASSERT_NOT_NULL(strstr(payload, "\"used\":0.03647255"));
+  TEST_ASSERT_NOT_NULL(strstr(payload, "\"limit\":12.00000000"));
+  TEST_ASSERT_NOT_NULL(strstr(payload, "\"resetInSec\":18000"));
+  TEST_ASSERT_NOT_NULL(strstr(payload, "\"used\":39.80909783"));
+  // The monthly reset comes from access.endsAt: 10d16h24m03s after updatedAt.
+  TEST_ASSERT_NOT_NULL(strstr(payload, "\"resetInSec\":923043"));
 }
 
-void test_rejects_incomplete_duplicate_or_inconsistent_windows() {
+void test_rejects_incomplete_or_malformed_status() {
   char payload[opencode_client::kUsagePayloadCapacity] = {};
-  constexpr char kIncomplete[] =
-      "rollingUsage:{usage:1,limit:2,usagePercent:50,resetInSec:1}";
-  TEST_ASSERT_FALSE(opencode_client::normalizeSerovalUsage(
-      kIncomplete, strlen(kIncomplete), 1, payload, sizeof(payload)));
+  constexpr char kMissingMonth[] =
+      "{\"access\":{\"endsAt\":\"2026-10-02T22:58:39.000Z\","
+      "\"meters\":{\"fiveHour\":{\"resetsAt\":\"2026-09-22T11:34:36.282Z\","
+      "\"limitMicroCents\":\"1200000000\",\"usedMicroCents\":\"1\"},"
+      "\"week\":{\"resetsAt\":\"2026-09-28T00:00:00.000Z\","
+      "\"limitMicroCents\":\"3000000000\",\"usedMicroCents\":\"1\"}}}}";
+  TEST_ASSERT_FALSE(opencode_client::normalizeConsoleStatusUsage(
+      kMissingMonth, strlen(kMissingMonth), kUpdatedAt, payload,
+      sizeof(payload)));
 
-  char duplicate[sizeof(kResponse) + 160] = {};
-  snprintf(duplicate, sizeof(duplicate),
-           "%s,rollingUsage:{usage:1,limit:2,"
-           "usagePercent:50,resetInSec:1}",
-           kResponse);
-  TEST_ASSERT_FALSE(opencode_client::normalizeSerovalUsage(
-      duplicate, strlen(duplicate), 1, payload, sizeof(payload)));
+  char noLimit[sizeof(kResponse)] = {};
+  snprintf(noLimit, sizeof(noLimit), "%s", kResponse);
+  char *limit = strstr(noLimit, "\"limitMicroCents\":\"6000000000\"");
+  TEST_ASSERT_NOT_NULL(limit);
+  memcpy(limit, "\"limitMicroCents\":\"0000000000\"",
+         strlen("\"limitMicroCents\":\"0000000000\""));
+  TEST_ASSERT_FALSE(opencode_client::normalizeConsoleStatusUsage(
+      noLimit, strlen(noLimit), kUpdatedAt, payload, sizeof(payload)));
 
-  char inconsistent[sizeof(kResponse)] = {};
-  snprintf(inconsistent, sizeof(inconsistent), "%s", kResponse);
-  char *percent = strstr(inconsistent, "usagePercent:0.8");
-  TEST_ASSERT_NOT_NULL(percent);
-  memcpy(percent, "usagePercent:99 ", strlen("usagePercent:99 "));
-  TEST_ASSERT_FALSE(opencode_client::normalizeSerovalUsage(
-      inconsistent, strlen(inconsistent), 1, payload, sizeof(payload)));
-}
+  char badDate[sizeof(kResponse)] = {};
+  snprintf(badDate, sizeof(badDate), "%s", kResponse);
+  char *reset = strstr(badDate, "2026-09-22T11:34:36.282Z");
+  TEST_ASSERT_NOT_NULL(reset);
+  memcpy(reset, "2026-13-99T99:99:99.000Z", strlen("2026-13-99T99:99:99.000Z"));
+  TEST_ASSERT_FALSE(opencode_client::normalizeConsoleStatusUsage(
+      badDate, strlen(badDate), kUpdatedAt, payload, sizeof(payload)));
 
-void test_extracts_only_a_single_lowercase_query_identifier() {
-  const char query[] =
-      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-  char script[256] = {};
-  char result[65] = {};
-  snprintf(script, sizeof(script),
-           "const queryLiteSubscription_query = createServerReference('%s');",
-           query);
-  TEST_ASSERT_TRUE(opencode_client::extractQueryIdFromScript(
-      script, strlen(script), result, sizeof(result)));
-  TEST_ASSERT_EQUAL_STRING(query, result);
-
-  snprintf(script, sizeof(script),
-           "const queryLiteSubscription_query = f('%s');"
-           "const queryLiteSubscription_query = f('%s');",
-           query, query);
-  TEST_ASSERT_FALSE(opencode_client::extractQueryIdFromScript(
-      script, strlen(script), result, sizeof(result)));
+  // 2026-02-30 does not exist and must not be accepted as a reset time.
+  char impossible[sizeof(kResponse)] = {};
+  snprintf(impossible, sizeof(impossible), "%s", kResponse);
+  char *day = strstr(impossible, "2026-09-22T11:34:36.282Z");
+  TEST_ASSERT_NOT_NULL(day);
+  memcpy(day, "2026-02-30T11:34:36.282Z", strlen("2026-02-30T11:34:36.282Z"));
+  TEST_ASSERT_FALSE(opencode_client::normalizeConsoleStatusUsage(
+      impossible, strlen(impossible), kUpdatedAt, payload, sizeof(payload)));
 }
 
 } // namespace
@@ -78,9 +83,8 @@ void tearDown() {}
 
 int runTests() {
   UNITY_BEGIN();
-  RUN_TEST(test_normalizes_all_three_seroval_windows_without_evaluation);
-  RUN_TEST(test_rejects_incomplete_duplicate_or_inconsistent_windows);
-  RUN_TEST(test_extracts_only_a_single_lowercase_query_identifier);
+  RUN_TEST(test_normalizes_all_three_console_meters);
+  RUN_TEST(test_rejects_incomplete_or_malformed_status);
   return UNITY_END();
 }
 

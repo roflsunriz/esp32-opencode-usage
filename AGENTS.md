@@ -19,20 +19,21 @@ Get-Content -Raw -LiteralPath .\COMMON-AGENTS.md
 - OpenCode Go ページ https://opencode.ai/workspace/wrk_01M1J5EPMB84QKX30P1A3ZJTAQ/go （ログイン済みページ）の公式資産をde-minify, または実リクエストのキャプチャ解析などを通して実装する
 - ログインを自前実装し、認証情報を保持する
 
-## 取得方式と認証（2026-09-09実測）
+## 取得方式と認証（2026-09-22実測）
 
-- Goコンソールの `queryLiteSubscription_query` は `/_server` のサーバー関数を呼ぶ。関数IDはデプロイごとに変わるため、認証済みGoページが参照する公式JavaScriptから検出する。固定ハッシュを製品コードに埋め込まない。
-- `rollingUsage` / `weeklyUsage` / `monthlyUsage` に `usage`、`limit`、`usagePercent`、`resetInSec` がある。金額は1ドル=100,000,000単位。モデルの倍率を反映した制限計算用の換算額であり、請求額と混同しない。割合は公式の丸め値を使い、丸めた割合から金額を逆算しない。詳細は `host/api.ts`、`host/usage.ts`。
-- 現在のレスポンスはSerovalのJavaScriptストリーム。外部コードをevalせず、必要な3期間の数値だけを厳格に読み取る。未知の形式、欠損、取得エラーを0%として表示しない。
-- 公式ログインはGitHub/Google認証を利用し、コンソールのHttpOnly `auth` Cookieで使用量を取得する。初回ログインはPCで行い、認証Cookie・Wi-Fi設定・ワークスペースをESP32のNVSへ保存する。通常運用はESP32のHTTPS直取得で、PCは不要、USBは給電だけにする。PC中継方式へ戻さない。`.private/` は認証、バックアップ、調査資産を置くGit管理外領域で、内容をログやコミットへ含めない。
+- Goコンソールは `https://opencode.ai/console/{workspace}/go` へ移行した。資産は `/console/assets/` 配下の分割チャンクで、旧来の `/_build/assets/` と `queryLiteSubscription_query` の取得先IDは廃止された。固定ハッシュを製品コードに埋め込まない。
+- 使用量は `GET /console/api/go/status` に `x-org-id: {workspace}` ヘッダーを付けて取得する。`access.meters` の `fiveHour`/`week`/`month` に `limitMicroCents`、`usedMicroCents`（文字列または数値）がある。金額は1セント=1,000,000 microCents（1ドル=100,000,000）単位の制限計算用換算額であり、請求額と混同しない。使用率は `used/limit*100` で計算する。`fiveHour`/`week` のリセットは各メーターの `resetsAt`（ISO8601 UTC）、`month` は `access.endsAt` から求める。未知の形式、欠損、取得エラーを0%として表示しない。詳細は `host/api.ts`、`host/usage.ts`、`docs/protocol.md`。
+- 認証はコンソールのHttpOnly `__Host-console_session` Cookieを使う。旧来の `auth` Cookieだけでは401になる。初回ログインはPCで行い、セッションCookie・Wi-Fi設定・ワークスペースをESP32のNVSへ保存する。通常運用はESP32のHTTPS直取得で、PCは不要、USBは給電だけにする。PC中継方式へ戻さない。`.private/` は認証、バックアップ、調査資産を置くGit管理外領域で、内容をログやコミットへ含めない。
+- 旧形式の認証レコード（`auth=`）はサーバー側で無効のため、本体起動時に破棄して初期設定画面に戻す。更新後はPC操作画面から再ログインと再保存が1回必要になる。
 
 ## 実機検証と復旧
 
 - USB機器を書き換える前に、全フラッシュを読み取り、実機とのdigest一致を確認する。検証後は全フラッシュを書き戻して再照合する。アプリ領域だけの退避ではNVSや設定を復旧できない。
+- Wi-Fi設定済みの実機は再起動のたびにDHCP取得IPなどをNVSへ書き戻すため、読み出しと照合の間にリセットを挟むとdigestが合わない。退避は `--after no_reset` で読み出し後に待機させ、そのまま `--before no_reset` で照合する（2026-09-22にCOM7で確認）。esptoolはv4.11.0（`.platformio` の同梱版、コマンドは `_` 表記）を使い、システムのv5系とは使い分ける。
 - 今回接続されたESP32は4MBフラッシュ、COM3だった。ポートと容量は毎回実測し、固定の機器識別情報を一般仕様にしない。
 - 2026-09-16のCOM6基板（ESP32-D0WD-V3・4MB）では `pio run -e esp32dev -t upload` が `Wrong boot mode detected (0x13)` で失敗し、BOOT押下保持中に再実行して成功した。書き込み後はBOOTを離してRSTを押さないと書込待機のまま応答しない。全フラッシュ退避の `verify-flash` も460800では同エラーが出ることがあり、115200での再実行でdigest一致を確認した（`verification.md`）。
 - PlatformIOのキャッシュは必要に応じ `PLATFORMIO_CORE_DIR` でリポジトリ内 `.platformio` に設定する。Bunの一時領域が権限制限に当たる環境では `TEMP`/`TMP` と `BUN_INSTALL_CACHE_DIR` を `.private/` 内へ設定して実行する。
-- `.platformio/packages/tool-esptoolpy/_contrib` のDACLに許可がなく読取不可になることがある（所有者は自分のまま）。`icacls <path> /grant <user>:(OI)(CI)F /t` で修復できる。権限不足のまま `pio run` するとbootloader生成でPermissionErrorになる。壊れたパッケージを中途半端に削除するとesptool本体が欠けて `_main` なしエラーになるため、修復後に不足時はディレクトリ全体を消して `pio run` で再取得する。
+- `.platformio/packages/tool-esptoolpy/_contrib` のDACLに許可がなく読取不可になることがある（所有者は自分のまま）。2026-09-22は `icacls`/`takeown` での修復が効かず、パッケージ全体を `.private/tool-esptoolpy.broken` へ退避して `pio run` で再取得した。壊れたパッケージを中途半端に削除するとesptool本体が欠けて `_main` なしエラーになるため、修復後に不足時はディレクトリ全体を消して `pio run` で再取得する。
 
 ## 実装上の注意（実機検証から判明）
 

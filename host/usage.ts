@@ -17,6 +17,10 @@ export interface UsageFrame {
   monthly: UsageWindow;
 }
 
+/** 金額はmicroCents（1セント=1,000,000）。1ドル=100,000,000として換算する。 */
+const microCentsPerDollar = 100_000_000;
+const maxSafeInteger = Number.MAX_SAFE_INTEGER;
+
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(
@@ -26,36 +30,58 @@ function object(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function number(value: unknown, name: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+function microCents(value: unknown, name: string): number {
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new Error(`使用量データの ${name} が不正です。`);
+    }
+    return value;
+  }
+  if (typeof value === "string" && /^[0-9]{1,19}$/.test(value)) {
+    const parsed = Number(value);
+    if (Number.isSafeInteger(parsed)) return parsed;
+  }
+  throw new Error(`使用量データの ${name} が不正です。`);
+}
+
+function resetInSecFrom(value: unknown, name: string, now: number): number {
+  if (typeof value !== "string" || value.length > 64) {
     throw new Error(`使用量データの ${name} が不正です。`);
   }
-  return value;
+  const moment = Date.parse(value);
+  if (!Number.isFinite(moment)) {
+    throw new Error(`使用量データの ${name} が不正です。`);
+  }
+  return Math.max(0, Math.round((moment - now) / 1000));
 }
+
+const meterNames: Record<Period, string> = {
+  rolling: "fiveHour",
+  weekly: "week",
+  monthly: "month",
+};
 
 export function normalizeUsage(value: unknown, now = Date.now()): UsageFrame {
   const source = object(value);
+  const access = object(source.access);
+  const meters = object(access.meters);
   const windows = {} as Record<Period, UsageWindow>;
   for (const period of periods) {
-    const item = object(source[`${period}Usage`]);
-    const used = number(item.usage, "usage") / 1e8;
-    const limit = number(item.limit, "limit") / 1e8;
-    const percent = number(item.usagePercent, "usagePercent");
-    const resetInSec = number(item.resetInSec, "resetInSec");
-    if (
-      limit <= 0 ||
-      !Number.isSafeInteger(item.usage) ||
-      !Number.isSafeInteger(item.limit)
-    ) {
+    const item = object(meters[meterNames[period]]);
+    const usedMicro = microCents(item.usedMicroCents, "usedMicroCents");
+    const limitMicro = microCents(item.limitMicroCents, "limitMicroCents");
+    if (limitMicro <= 0 || limitMicro > maxSafeInteger) {
       throw new Error("使用量または上限額の精度が不正です。");
     }
-    // The console rounds percentages; keep its reported value and do not clamp
-    // the displayed number. Only the LCD/bar drawing clamps at 100%.
-    if (Math.abs(percent - (used / limit) * 100) > 0.11) {
-      throw new Error(
-        "使用率と金額が一致しません。公式データの形式を確認してください。",
-      );
+    const used = usedMicro / microCentsPerDollar;
+    const limit = limitMicro / microCentsPerDollar;
+    const percent = (usedMicro / limitMicro) * 100;
+    if (!Number.isFinite(percent)) {
+      throw new Error("使用率の計算に失敗しました。");
     }
+    // 月間メーターに resetsAt はなく、契約の endsAt がリセット時刻になる。
+    const resetSource = period === "monthly" ? access.endsAt : item.resetsAt;
+    const resetInSec = resetInSecFrom(resetSource, "resetsAt", now);
     windows[period] = { used, limit, percent, resetInSec };
   }
   return {
@@ -66,7 +92,7 @@ export function normalizeUsage(value: unknown, now = Date.now()): UsageFrame {
   };
 }
 
-/** Read only the three numeric records, never execute server-supplied JavaScript. */
+/** 公式の使用量JSONだけを読み取る。未知の形式は例外にし、0%表示にしない。 */
 export function decodeUsageResponse(
   text: string,
   contentType: string,
@@ -75,36 +101,7 @@ export function decodeUsageResponse(
     throw new Error("使用量レスポンスが大きすぎます。");
   if (contentType.startsWith("application/json"))
     return JSON.parse(text) as unknown;
-  if (!contentType.startsWith("text/javascript")) {
-    throw new Error("使用量を取得できませんでした。再ログインしてください。");
-  }
-  const output: Record<string, unknown> = {};
-  for (const period of periods) {
-    const regex = new RegExp(
-      `\\b${period}Usage\\s*:\\s*(?:\\$R\\[\\d+\\]\\s*=\\s*)?\\{([^{}]*)\\}`,
-      "g",
-    );
-    const matches = [...text.matchAll(regex)];
-    if (matches.length !== 1)
-      throw new Error("公式の使用量レスポンス形式が変わっています。");
-    const record = matches[0]?.[1] ?? "";
-    const parsed: Record<string, unknown> = {};
-    for (const name of ["usage", "limit", "usagePercent", "resetInSec"]) {
-      const values = [
-        ...record.matchAll(
-          new RegExp(
-            `(?:^|,)\\s*${name}\\s*:\\s*([0-9]+(?:\\.[0-9]+)?(?:e[+-]?[0-9]+)?)\\s*(?=,|$)`,
-            "gi",
-          ),
-        ),
-      ];
-      if (values.length !== 1)
-        throw new Error("公式の使用量データに必要な数値がありません。");
-      parsed[name] = Number(values[0]?.[1]);
-    }
-    output[`${period}Usage`] = parsed;
-  }
-  return output;
+  throw new Error("使用量を取得できませんでした。再ログインしてください。");
 }
 
 export function validateWorkspace(workspace: string): string {

@@ -123,7 +123,8 @@ LegacyV2 validLegacy() {
   legacy.enabled = 1;
   snprintf(legacy.ssid, sizeof(legacy.ssid), "test-network");
   snprintf(legacy.password, sizeof(legacy.password), "test-password");
-  snprintf(legacy.authCookie, sizeof(legacy.authCookie), "auth=test-cookie");
+  snprintf(legacy.authCookie, sizeof(legacy.authCookie),
+           "__Host-console_session=test-cookie");
   snprintf(legacy.workspace, sizeof(legacy.workspace), "wrk_0123456789ABCDEF");
   memset(legacy.queryId, 'a', sizeof(legacy.queryId) - 1);
   legacy.pollIntervalSec = 60;
@@ -140,7 +141,8 @@ void test_migrates_verified_schema2_and_preserves_credentials() {
   TEST_ASSERT_TRUE(store.load(config));
   TEST_ASSERT_EQUAL_STRING("test-network", config.ssid);
   TEST_ASSERT_EQUAL_STRING("test-password", config.password);
-  TEST_ASSERT_EQUAL_STRING("auth=test-cookie", config.authCookie);
+  TEST_ASSERT_EQUAL_STRING("__Host-console_session=test-cookie",
+                             config.authCookie);
   TEST_ASSERT_EQUAL_STRING("wrk_0123456789ABCDEF", config.workspace);
   TEST_ASSERT_EQUAL_UINT32(60, config.pollIntervalSec);
   TEST_ASSERT_EQUAL_UINT32(config_store::kDefaultBacklightTimeoutSec,
@@ -168,7 +170,8 @@ LegacyV3 validLegacyV3() {
   legacy.enabled = 1;
   snprintf(legacy.ssid, sizeof(legacy.ssid), "test-network");
   snprintf(legacy.password, sizeof(legacy.password), "test-password");
-  snprintf(legacy.authCookie, sizeof(legacy.authCookie), "auth=test-cookie");
+  snprintf(legacy.authCookie, sizeof(legacy.authCookie),
+           "__Host-console_session=test-cookie");
   snprintf(legacy.workspace, sizeof(legacy.workspace), "wrk_0123456789ABCDEF");
   memset(legacy.queryId, 'a', sizeof(legacy.queryId) - 1);
   legacy.pollIntervalSec = 120;
@@ -277,6 +280,27 @@ void test_rejects_current_record_with_invalid_flip_value() {
   TEST_ASSERT_EQUAL_UINT32(0, Preferences::size());
 }
 
+void test_rejects_legacy_auth_cookie_scheme() {
+  // The console no longer accepts the legacy auth cookie. A stored record
+  // with the old scheme must be discarded so the setup screen asks for a
+  // fresh login instead of polling with a dead credential.
+  CurrentV4 saved = {};
+  saved.schemaVersion = config_store::kConfigSchemaVersion;
+  saved.enabled = 1;
+  snprintf(saved.ssid, sizeof(saved.ssid), "test-network");
+  snprintf(saved.authCookie, sizeof(saved.authCookie), "auth=test-cookie");
+  snprintf(saved.workspace, sizeof(saved.workspace), "wrk_0123456789ABCDEF");
+  saved.pollIntervalSec = config_store::kDefaultPollIntervalSec;
+  saved.backlightTimeoutSec = config_store::kDefaultBacklightTimeoutSec;
+  saved.checksum = crc32(reinterpret_cast<const uint8_t *>(&saved),
+                         offsetof(CurrentV4, checksum));
+  Preferences::setFixture(&saved, sizeof(saved));
+  static config_store::WiFiConfig config;
+  config_store::ConfigStore store;
+  TEST_ASSERT_FALSE(store.load(config));
+  TEST_ASSERT_EQUAL_UINT32(0, Preferences::size());
+}
+
 void test_save_persists_screen_flip() {
   config_store::WiFiConfig config;
   config_store::reset(config);
@@ -343,6 +367,7 @@ int runTests() {
   RUN_TEST(test_rejects_a_schema2_record_with_invalid_crc);
   RUN_TEST(test_loads_display_setting_from_a_valid_disabled_wifi_record);
   RUN_TEST(test_rejects_current_record_with_invalid_flip_value);
+  RUN_TEST(test_rejects_legacy_auth_cookie_scheme);
   RUN_TEST(test_save_persists_screen_flip);
   RUN_TEST(test_save_reports_preferences_write_failure);
   RUN_TEST(test_failed_false_flip_save_preserves_existing_true_flip);

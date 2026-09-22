@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-22
+
+### Changed
+
+- 公式コンソールの移行（`/console` 配下・使用量API）に追従し、PCとESP32の取得処理を `GET /console/api/go/status`（`x-org-id` ヘッダー・microCents単位の `meters`）へ切り替えた。旧来の `/_server` 取得・Seroval解析・取得先ID検出を撤去し、USB設定の `queryId` は互換保持の空欄にした。
+- 認証をコンソールのセッションCookie（`__Host-console_session`）へ切り替えた。旧形式の認証レコードは本体起動時に破棄するため、更新後はPC操作画面からの再ログインと再保存が1回必要になる。
+
+### Fixed
+
+- 権限破損で読み取れなくなった `.platformio` の `tool-esptoolpy` を隔離し、再取得でESP32ビルドを復旧した。隔離物は `.private/` に保管している。
+
 ## [0.2.2] - 2026-09-16
 
 ### Added
