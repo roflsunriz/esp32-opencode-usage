@@ -38,6 +38,7 @@ Get-Content -Raw -LiteralPath .\COMMON-AGENTS.md
 ## 実装上の注意（実機検証から判明）
 
 - WindowsのCH340実機でserialport 13はBunでもNode.js単独でもwriteが停止した。import・列挙・openだけでは検出できない。製品のUSB通信は `host/serial-worker.py` をPython/pySerialで起動して行う。実機で連続送受信を検証せずネイティブNode bindingへ戻さない。
+- pySerialはopen時のDTRパルスでCH340経由の自動リセットやGPIO0押下を起こす。GPIO0の押下・解放は画面反転の保存付き切替になるため、製品workerも診断スクリプトもDTR/RTSをopen前に落として開く。互換確認は再起動後のreadyではなくping応答で行う。2026-09-23にCOM7で新旧workerのuptime差（修正版は再起動なし、旧版はuptime約500msへ戻る）で確認。
 - Bunの子プロセスstdinは `flush()` のPromiseを処理する。未処理の非同期EPIPEはホスト全体を終了させる。workerのcloseはシリアルを閉じて終了し、親もEOFと終了タイムアウトを扱う。退行テストは `host/device.test.ts`。
 - Preferencesの `putString("")` は成功時も0を返すため、単純な `>0` 判定ではWi-Fi削除が失敗する。現在はバージョンとCRC付きの単一blobへ保存し、相関ID付きACKを保存完了後に返す。
 - 2026-09-09の旧版ではAdafruitの公開SPI低レベルAPIでGRAMを読み出した。2026-09-14以降の`screenshot`はTFT_eSPIの`readRectRGB`で従来の2MHz・1行960バイトずつ読み、実機の画像一致は未再確認（`platformio.ini`、`display_controller.cpp`、`verification.md`）。

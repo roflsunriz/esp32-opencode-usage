@@ -192,12 +192,20 @@ def request_stop(_signal_number: int, _frame: FrameType | None) -> None:
 
 def run_port(path: str) -> int:
     try:
+        # DTR/RTSはopen前に落とす。open時のパルスがCH340経由でESP32の
+        # 自動リセットやGPIO0押下（画面反転の保存付き切替）を誤作動させる。
+        # 互換確認は再起動後のreadyではなくping応答で行うため、
+        # 接続時のリセットは不要である。
         serial_port: serial.Serial = serial.Serial(
-            port=path,
+            port=None,
             baudrate=BAUD_RATE,
             timeout=READ_TIMEOUT_SECONDS,
             write_timeout=WRITE_TIMEOUT_SECONDS,
         )
+        serial_port.dtr = False
+        serial_port.rts = False
+        serial_port.port = path
+        serial_port.open()
     except (serial.SerialException, OSError):
         emit_error()
         emit_close()
