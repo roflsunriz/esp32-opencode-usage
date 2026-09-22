@@ -128,6 +128,7 @@ private:
   // gesture mode (slider adjust, scrollbar jump, or relative scroll).
   bool dragActive_ = false;
   touch_ui::ActionKind dragMode_ = touch_ui::ActionKind::kNone;
+  bool dragStartedInHeader_ = false;
   int16_t dragStartX_ = 0;
   int16_t dragStartY_ = 0;
   int16_t dragStartScroll_ = 0;

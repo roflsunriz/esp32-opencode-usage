@@ -423,8 +423,14 @@ bool DisplayController::pollTouch(TouchEvent &event) {
       lastDragKind_ = touch_ui::ActionKind::kNone;
       dragActive_ = false;
       dragMode_ = touch_ui::ActionKind::kNone;
+      dragStartedInHeader_ = false;
     } else if (touchLatch_.isLatched() && backlightOn() &&
                activeTab_ == touch_ui::Tab::kDisplay) {
+      if (dragStartedInHeader_) {
+        // Contacts that start on the tab bar are tab switches, never
+        // scrolls or slider adjustments.
+        return false;
+      }
       touch_ui::Point dragPoint;
       if (readTouchPoint(dragPoint)) {
         wakeBacklight();
@@ -499,6 +505,7 @@ bool DisplayController::pollTouch(TouchEvent &event) {
     // but it is not a tap.
     dragActive_ = false;
     dragMode_ = touch_ui::ActionKind::kNone;
+    dragStartedInHeader_ = false;
     if (wasOff) {
       wakeBacklight();
     }
@@ -509,6 +516,7 @@ bool DisplayController::pollTouch(TouchEvent &event) {
     event.kind = TouchEventKind::kWakeOnly;
     dragActive_ = false;
     dragMode_ = touch_ui::ActionKind::kNone;
+    dragStartedInHeader_ = false;
     return true;
   }
   event.kind = TouchEventKind::kTap;
@@ -517,9 +525,11 @@ bool DisplayController::pollTouch(TouchEvent &event) {
                                    displayScroll_);
   // Fix the drag gesture mode at tap time: slider rows and the scrollbar
   // keep their own mapping while the contact continues, and taps anywhere
-  // else become relative whole-content scrolls.
+  // else become relative whole-content scrolls. Taps starting on the tab
+  // bar never scroll.
   dragActive_ = true;
   dragMode_ = event.action.kind;
+  dragStartedInHeader_ = event.point.y < touch_ui::kTabHeight;
   dragStartX_ = event.point.x;
   dragStartY_ = event.point.y;
   dragStartScroll_ = displayScroll_;
