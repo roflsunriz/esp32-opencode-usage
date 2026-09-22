@@ -1,12 +1,17 @@
 # 検証
 
-## Displayタブのスライダー化と取得残り時間表示（2026-09-23、ホスト検証済み・実機未検証）
+## Displayタブのスライダー化と取得残り時間表示（2026-09-23、実機検証済み）
 
 作戦書 `esp32-ui-style.md` に基づき、Displayタブを固定9択から0〜59分・0〜24時間・取得間隔60〜600秒（60秒刻み）のスライダー＋スクロールバーへ変え、Usageタブのフッターへ次の取得までの残り秒数表示を追加した。0分0時間は自動消灯オフ（常時点灯）と同じになる。従来の9択保存値は有効なまま移行する。
 
 - native 39件・ホスト37件・ESP32ビルド・`bun audit`（脆弱性なし）・mypy strict・ruff整形・CA照合が成功した。
-- 実機の表示・タッチ・取得残り時間・再起動後の保持は未検証。COM7基板への書き込みは全フラッシュ退避と照合のうえ別途行い、スライダー操作・スクロール・常時点灯・取得残り秒数の変化を `screenshot` と目視で確認する。
-- COM7の読取のみの接続確認では `firmware=opencode-go-lcd`・`setupSchema=3`・`pollIntervalSec=60`・`backlightTimeoutSec=7200` の応答を確認した（書込なし）。
+- COM7基板（ESP32-D0WD-V3・4MB）へ全flash退避（4,194,304バイト、SHA-256 `83F5D058…3AC4E`、`.private/backups/before-slider-ui-20260923.bin`）と `verify-flash` のdigest一致を確認してから試験した。自動リセット接続は `Wrong boot mode detected (0x13)` のため、BOOT保持中に読み出し・書き込みを行い、読み出し後は `--after no_reset` で待機維持して `--before no_reset` で照合した。
+- アプリ領域のみ更新し、NVSの認証・Wi-Fi・校正値を保持した。起動後にESP32の直接取得（`hasUsage=true`）を確認した。
+- 実機LCDのUSB読出しでUsageタブの3期間・金額・バー・リセット時間と `Usage updated - next 31s`、Displayタブの3スライダー・スクロールバー・`Off after: 2h 10m`・`Update 120s` を画像確認した（`docs/lcd-display-sliders.png`）。
+- ペンのドラッグ操作に対応し、押し付けたままなぞると分・時間・取得間隔が追従すること（2h10m・120sへの変更）を所有者が実機で確認した。
+- PC接続時のDTRパルスが再起動と画面反転の保存付き切替を起こしていた問題を修正し、修正版workerでは接続時の再起動がなくping互換を確認した。旧版では接続でuptimeが約500msへ戻ることを対比確認した。
+- 試験終了時は元の全4MBを書き戻し、`verify-flash` の完全一致を確認した。復元後は退避時の設定値（取得間隔60秒・消灯7200秒）へ戻り、直接取得の再開を確認した。
+- COM7の読取のみの接続確認では `firmware=opencode-go-lcd`・`setupSchema=3` の応答を確認した。
 
 ## コンソール移行への追従（2026-09-22、実機検証済み）
 
