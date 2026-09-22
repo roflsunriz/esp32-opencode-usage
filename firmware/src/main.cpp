@@ -328,6 +328,7 @@ void sendDisplayAck(const char *requestId) {
     document["requestId"] = requestId;
   }
   addBacklightState(document, false);
+  document["pollIntervalSec"] = wifiConfig.pollIntervalSec;
   serializeJson(document, Serial);
   Serial.println();
 }
@@ -418,6 +419,14 @@ const char *touchActionName(touch_ui::ActionKind kind) {
     return "display";
   case touch_ui::ActionKind::kTimeout:
     return "timeout";
+  case touch_ui::ActionKind::kSleepMinutes:
+    return "sleep-minutes";
+  case touch_ui::ActionKind::kSleepHours:
+    return "sleep-hours";
+  case touch_ui::ActionKind::kPollInterval:
+    return "poll-interval";
+  case touch_ui::ActionKind::kDisplayScroll:
+    return "display-scroll";
   case touch_ui::ActionKind::kNone:
     return "none";
   }
@@ -437,10 +446,34 @@ void sendTouchDiagnostic(const TouchEvent &event) {
     document["action"] = touchActionName(event.action.kind);
     if (event.action.kind == touch_ui::ActionKind::kTimeout) {
       document["backlightTimeoutSec"] = event.action.timeoutSec;
+    } else if (event.action.kind == touch_ui::ActionKind::kSleepMinutes ||
+               event.action.kind == touch_ui::ActionKind::kSleepHours ||
+               event.action.kind ==
+                   touch_ui::ActionKind::kPollInterval) {
+      document["value"] = event.action.timeoutSec;
+    } else if (event.action.kind ==
+               touch_ui::ActionKind::kDisplayScroll) {
+      document["scroll"] = event.action.timeoutSec;
     }
   }
   serializeJson(document, Serial);
   Serial.println();
+}
+
+bool applyPollInterval(uint32_t pollSec, char *error,
+                       size_t errorCapacity) {
+  if (!backlight_timer::isValidPollSlider(pollSec)) {
+    setErrorText(error, errorCapacity, "pollIntervalSec must be 60..600");
+    return false;
+  }
+  const uint32_t previousPoll = wifiConfig.pollIntervalSec;
+  wifiConfig.pollIntervalSec = pollSec;
+  if (!configStore.save(wifiConfig, error, errorCapacity)) {
+    wifiConfig.pollIntervalSec = previousPoll;
+    return false;
+  }
+  networkClient.setPollIntervalSec(pollSec);
+  return true;
 }
 
 bool processTouch() {
@@ -463,12 +496,12 @@ bool processTouch() {
     }
     break;
   case touch_ui::ActionKind::kDisplayTab:
-    display.showDisplayTab(wifiConfig.backlightTimeoutSec);
+    display.showDisplayTab(wifiConfig.backlightTimeoutSec, wifiConfig.pollIntervalSec);
     break;
   case touch_ui::ActionKind::kTimeout: {
     char error[kErrorCapacity] = {};
     if (applyBacklightTimeout(event.action.timeoutSec, error, sizeof(error))) {
-      display.showDisplayTab(wifiConfig.backlightTimeoutSec);
+      display.showDisplayTab(wifiConfig.backlightTimeoutSec, wifiConfig.pollIntervalSec);
       display.showStatus("Screen timeout saved", ILI9341_GREEN);
       // There is no serial requestId for an on-device tap, but the same ACK
       // lets a connected setup UI synchronize the persisted selection.
@@ -479,6 +512,46 @@ bool processTouch() {
     }
     break;
   }
+  case touch_ui::ActionKind::kSleepMinutes:
+  case touch_ui::ActionKind::kSleepHours: {
+    const uint32_t minutes =
+        event.action.kind == touch_ui::ActionKind::kSleepMinutes
+            ? event.action.timeoutSec
+            : backlight_timer::sleepMinutesPart(
+                  wifiConfig.backlightTimeoutSec);
+    const uint32_t hours =
+        event.action.kind == touch_ui::ActionKind::kSleepHours
+            ? event.action.timeoutSec
+            : backlight_timer::sleepHoursPart(wifiConfig.backlightTimeoutSec);
+    const uint32_t total =
+        backlight_timer::sleepTimeoutFromParts(minutes, hours);
+    char error[kErrorCapacity] = {};
+    if (applyBacklightTimeout(total, error, sizeof(error))) {
+      display.showDisplayTab(wifiConfig.backlightTimeoutSec, wifiConfig.pollIntervalSec);
+      display.showStatus(total == 0 ? "Always on" : "Screen timeout saved",
+                         ILI9341_GREEN);
+      sendDisplayAck(nullptr);
+    } else {
+      display.showStatus(error, ILI9341_RED);
+      sendError(error);
+    }
+    break;
+  }
+  case touch_ui::ActionKind::kPollInterval: {
+    char error[kErrorCapacity] = {};
+    if (applyPollInterval(event.action.timeoutSec, error, sizeof(error))) {
+      display.showDisplayTab(wifiConfig.backlightTimeoutSec, wifiConfig.pollIntervalSec);
+      display.showStatus("Poll interval saved", ILI9341_GREEN);
+      sendDisplayAck(nullptr);
+    } else {
+      display.showStatus(error, ILI9341_RED);
+      sendError(error);
+    }
+    break;
+  }
+  case touch_ui::ActionKind::kDisplayScroll:
+    display.setDisplayScroll(static_cast<int16_t>(event.action.timeoutSec));
+    break;
   case touch_ui::ActionKind::kNone:
     break;
   }
@@ -490,7 +563,8 @@ bool processBootButton() {
     display.wakeBacklight();
     display.calibrateTouch();
     display.redraw(hasUsage ? &latestUsage : nullptr,
-                   wifiConfig.backlightTimeoutSec);
+                  wifiConfig.backlightTimeoutSec,
+                  wifiConfig.pollIntervalSec);
     return true;
   }
   if (!display.consumeBootClick()) {
@@ -506,7 +580,8 @@ bool processBootButton() {
   }
   display.setScreenFlipped(wifiConfig.screenFlipped);
   display.redraw(hasUsage ? &latestUsage : nullptr,
-                 wifiConfig.backlightTimeoutSec);
+                 wifiConfig.backlightTimeoutSec,
+                 wifiConfig.pollIntervalSec);
   sendDisplayAck(nullptr);
   return true;
 }
@@ -595,7 +670,7 @@ bool processFrame(const char *payload, const char *source) {
     networkClient.setConfig(wifiConfig);
     display.setBacklightTimeoutSec(wifiConfig.backlightTimeoutSec);
     if (display.activeTab() == touch_ui::Tab::kDisplay) {
-      display.showDisplayTab(wifiConfig.backlightTimeoutSec);
+      display.showDisplayTab(wifiConfig.backlightTimeoutSec, wifiConfig.pollIntervalSec);
     }
     display.showStatus(wifiConfig.enabled ? "WiFi config saved"
                                           : "Setup cleared - use PC",
@@ -622,8 +697,21 @@ bool processFrame(const char *payload, const char *source) {
       sendError(error);
       return false;
     }
+    if (!root["pollIntervalSec"].isNull()) {
+      uint64_t poll = 0;
+      if (!readInteger(root["pollIntervalSec"], poll) || poll > UINT32_MAX ||
+          !backlight_timer::isValidPollSlider(static_cast<uint32_t>(poll))) {
+        sendError("pollIntervalSec must be 60..600");
+        return false;
+      }
+      if (!applyPollInterval(static_cast<uint32_t>(poll), error,
+                             sizeof(error))) {
+        sendError(error);
+        return false;
+      }
+    }
     if (display.activeTab() == touch_ui::Tab::kDisplay) {
-      display.showDisplayTab(wifiConfig.backlightTimeoutSec);
+      display.showDisplayTab(wifiConfig.backlightTimeoutSec, wifiConfig.pollIntervalSec);
     }
     sendDisplayAck(requestId);
     return true;
@@ -736,6 +824,8 @@ void loop() {
   sendBacklightEventIfChanged();
   const uint32_t pollInterval =
       wifiConfig.enabled ? wifiConfig.pollIntervalSec : 60;
+  display.updatePollCountdown(networkClient.pollRemainingMs(nowMs),
+                              pollInterval);
   if (hasUsage && !staleReported &&
       usage_model::isStale(millis() - lastFreshUsageMs, pollInterval)) {
     staleReported = true;

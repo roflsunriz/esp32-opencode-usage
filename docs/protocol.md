@@ -123,7 +123,7 @@ MOSI=13、MISO=12、SCLK=14、CS=15、DC=2、BL=21、RST=-1。ILI9341の描画�
 
 ## 自動消灯の設定
 
-`backlightTimeoutSec` は15、30、60、120、300、600、1800、3600、7200だけを受理する。初期値60。`config`にも含められ、`display`では既存のWi-Fiと認証を保持して時間だけを保存する。
+`backlightTimeoutSec` は0〜89940の整数を受理する。0は自動消灯オフ（常時点灯）で、値は「時×3600＋分×60」に対応する。初期値60。`config`にも含められ、`display`では既存のWi-Fiと認証を保持して時間だけを保存する。`display`は任意で `pollIntervalSec`（60〜600の60秒刻み）も受け付け、取得間隔だけを変更できる。
 
 ```json
 {
@@ -134,7 +134,7 @@ MOSI=13、MISO=12、SCLK=14、CS=15、DC=2、BL=21、RST=-1。ILI9341の描画�
 }
 ```
 
-`wake` は点灯して期限を再設定する。両操作とも同じ `requestId` と、操作名の `accepted` を持つACKを返す。状態には `backlightOn`、`backlightTimeoutSec` が含まれ、pingには残り時間とGPIO21読戻し値も含む。通信や再描画自体は期限を延長しない。
+`wake` は点灯して期限を再設定する。両操作とも同じ `requestId` と、操作名の `accepted` を持つACKを返す。`display` のACKには `pollIntervalSec` も含む。状態には `backlightOn`、`backlightTimeoutSec` が含まれ、pingには残り時間とGPIO21読戻し値も含む。通信や再描画自体は期限を延長しない。
 
 消灯判定とBOOTの検出はHTTPS通信とは独立した10ms周期のタイマーで行う。タッチの起床はGPIO36の割り込みで受け付け、実際の画面設定はLCD上のUsage/Displayタブから行う。
 

@@ -124,6 +124,66 @@ void test_sprite_clear_covers_full_320_pixel_width() {
   TEST_ASSERT_EQUAL_INT(240, surface.height);
 }
 
+void test_slider_value_round_trips_with_track_ends() {
+  TEST_ASSERT_EQUAL_UINT32(
+      0, touch_ui::sliderValueFromX(touch_ui::kSliderTrackX0, 0, 59, 1));
+  TEST_ASSERT_EQUAL_UINT32(
+      59, touch_ui::sliderValueFromX(touch_ui::kSliderTrackX1, 0, 59, 1));
+  TEST_ASSERT_EQUAL_UINT32(
+      60, touch_ui::sliderValueFromX(touch_ui::kSliderTrackX0, 60, 600, 60));
+  TEST_ASSERT_EQUAL_UINT32(
+      600, touch_ui::sliderValueFromX(touch_ui::kSliderTrackX1, 60, 600, 60));
+  TEST_ASSERT_EQUAL_INT16(
+      touch_ui::kSliderTrackX0, touch_ui::sliderXFromValue(0, 0, 59));
+  TEST_ASSERT_EQUAL_INT16(
+      touch_ui::kSliderTrackX1, touch_ui::sliderXFromValue(59, 0, 59));
+  // Out-of-track taps clamp instead of producing out-of-range values.
+  TEST_ASSERT_EQUAL_UINT32(
+      0, touch_ui::sliderValueFromX(-100, 0, 59, 1));
+  TEST_ASSERT_EQUAL_UINT32(
+      600, touch_ui::sliderValueFromX(999, 60, 600, 60));
+  // Poll slider quantizes to 60-second steps.
+  const uint32_t middle = touch_ui::sliderValueFromX(
+      (touch_ui::kSliderTrackX0 + touch_ui::kSliderTrackX1) / 2, 60, 600,
+      60);
+  TEST_ASSERT_EQUAL_UINT32(0, middle % 60);
+}
+
+void test_slider_rows_hit_test_with_content_coordinates() {
+  const int16_t minuteX =
+      touch_ui::sliderXFromValue(30, 0, 59);
+  touch_ui::Action minutes =
+      touch_ui::hitTestDisplaySliders(minuteX, touch_ui::kSliderMinutesY);
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(touch_ui::ActionKind::kSleepMinutes),
+      static_cast<int>(minutes.kind));
+  TEST_ASSERT_EQUAL_UINT32(30, minutes.timeoutSec);
+
+  const int16_t hourX = touch_ui::sliderXFromValue(2, 0, 24);
+  touch_ui::Action hours =
+      touch_ui::hitTestDisplaySliders(hourX, touch_ui::kSliderHoursY);
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(touch_ui::ActionKind::kSleepHours),
+      static_cast<int>(hours.kind));
+  TEST_ASSERT_EQUAL_UINT32(2, hours.timeoutSec);
+
+  const int16_t pollX = touch_ui::sliderXFromValue(300, 60, 600);
+  touch_ui::Action poll =
+      touch_ui::hitTestDisplaySliders(pollX, touch_ui::kSliderPollY);
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(touch_ui::ActionKind::kPollInterval),
+      static_cast<int>(poll.kind));
+  TEST_ASSERT_EQUAL_UINT32(300, poll.timeoutSec);
+
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(touch_ui::ActionKind::kNone),
+      static_cast<int>(
+          touch_ui::hitTestDisplaySliders(minuteX, 10).kind));
+  TEST_ASSERT_EQUAL_INT(0, touch_ui::clampScroll(-5));
+  TEST_ASSERT_EQUAL_INT(touch_ui::kDisplayScrollMax,
+                        touch_ui::clampScroll(9999));
+}
+
 void test_latches_each_contact_until_penirq_is_high_for_twenty_ms() {
   touch_ui::ReleaseLatch latch;
   TEST_ASSERT_TRUE(latch.accept());
@@ -151,25 +211,36 @@ void test_switches_tabs_only_in_the_header() {
       static_cast<int>(touch_ui::hitTest(touch_ui::Tab::kUsage, 10, 60).kind));
 }
 
-void test_maps_all_nine_display_buttons_to_the_supported_timeouts() {
-  for (uint16_t row = 0; row < touch_ui::kGridRows; ++row) {
-    for (uint16_t column = 0; column < touch_ui::kGridColumns; ++column) {
-      const uint16_t x =
-          touch_ui::kGridLeft +
-          column * (touch_ui::kButtonWidth + touch_ui::kGridGapX) +
-          touch_ui::kButtonWidth / 2;
-      const uint16_t y = touch_ui::kGridTop +
-                         row * (touch_ui::kButtonHeight + touch_ui::kGridGapY) +
-                         touch_ui::kButtonHeight / 2;
-      const touch_ui::Action action =
-          touch_ui::hitTest(touch_ui::Tab::kDisplay, x, y);
-      const size_t index = row * touch_ui::kGridColumns + column;
-      TEST_ASSERT_EQUAL_INT(static_cast<int>(touch_ui::ActionKind::kTimeout),
-                            static_cast<int>(action.kind));
-      TEST_ASSERT_EQUAL_UINT32(backlight_timer::kTimeoutOptionsSec[index],
-                               action.timeoutSec);
-    }
-  }
+void test_display_tab_routes_sliders_and_scrollbar() {
+  // Slider rows resolve through the tab-level hit test without scrolling.
+  const int16_t minuteX = touch_ui::sliderXFromValue(30, 0, 59);
+  const touch_ui::Action routed = touch_ui::hitTest(
+      touch_ui::Tab::kDisplay, static_cast<uint16_t>(minuteX),
+      static_cast<uint16_t>(touch_ui::kSliderMinutesY));
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(touch_ui::ActionKind::kSleepMinutes),
+      static_cast<int>(routed.kind));
+  TEST_ASSERT_EQUAL_UINT32(30, routed.timeoutSec);
+  // A scrolled tab offsets content coordinates: the same screen tap now
+  // lands 20 content pixels lower.
+  const touch_ui::Action scrolled = touch_ui::hitTest(
+      touch_ui::Tab::kDisplay, static_cast<uint16_t>(minuteX),
+      static_cast<uint16_t>(touch_ui::kSliderMinutesY - 20), 20);
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(touch_ui::ActionKind::kSleepMinutes),
+      static_cast<int>(scrolled.kind));
+  // Scrollbar tap below the thumb pages down from the top.
+  const touch_ui::Action page = touch_ui::hitTest(
+      touch_ui::Tab::kDisplay, 312, 210);
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(touch_ui::ActionKind::kDisplayScroll),
+      static_cast<int>(page.kind));
+  TEST_ASSERT_EQUAL_UINT32(touch_ui::kScrollPage, page.timeoutSec);
+  // Usage tab has no Display content actions.
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(touch_ui::ActionKind::kNone),
+      static_cast<int>(
+          touch_ui::hitTest(touch_ui::Tab::kUsage, 20, 100).kind));
 }
 
 void setUp() {}
@@ -185,8 +256,10 @@ int runTests() {
   RUN_TEST(test_only_changed_display_bands_are_transferred);
   RUN_TEST(test_sprite_clear_covers_full_320_pixel_width);
   RUN_TEST(test_latches_each_contact_until_penirq_is_high_for_twenty_ms);
+  RUN_TEST(test_slider_value_round_trips_with_track_ends);
+  RUN_TEST(test_slider_rows_hit_test_with_content_coordinates);
   RUN_TEST(test_switches_tabs_only_in_the_header);
-  RUN_TEST(test_maps_all_nine_display_buttons_to_the_supported_timeouts);
+  RUN_TEST(test_display_tab_routes_sliders_and_scrollbar);
   return UNITY_END();
 }
 

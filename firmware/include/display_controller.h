@@ -11,6 +11,7 @@
 #include "backlight_timer.h"
 #include "board_pins.h"
 #include "boot_button.h"
+#include "config_store.h"
 #include "display-diff.h"
 #include "touch_ui.h"
 #include "usage_model.h"
@@ -34,7 +35,8 @@ public:
 
   void begin(bool flipped = false);
   void setScreenFlipped(bool flipped);
-  void redraw(const usage_model::UsageSnapshot *snapshot, uint32_t timeoutSec);
+  void redraw(const usage_model::UsageSnapshot *snapshot, uint32_t timeoutSec,
+              uint32_t pollIntervalSec);
   bool consumeBootClick();
   bool consumeBootCalibration();
   void calibrateTouch();
@@ -42,8 +44,14 @@ public:
   void renderNoData(const char *message);
   void renderSnapshot(const usage_model::UsageSnapshot &snapshot);
   void showUsageTab();
-  void showDisplayTab(uint32_t selectedTimeoutSec);
+  void showDisplayTab(uint32_t selectedTimeoutSec, uint32_t pollIntervalSec);
   void showStatus(const char *message, uint16_t color = ILI9341_WHITE);
+  // Scrolls the Display-tab content. The offset is clamped to the content.
+  void setDisplayScroll(int16_t scroll);
+  // Updates the "next poll" countdown shown in the footer. remainingMs is
+  // UINT32_MAX while the cadence is unknown. Returns true when the displayed
+  // second changed (and the footer was refreshed).
+  bool updatePollCountdown(uint32_t remainingMs, uint32_t pollIntervalSec);
 
   bool pollTouch(TouchEvent &event);
   bool hasTouchPending();
@@ -100,6 +108,9 @@ private:
   display_diff::Bands bandDiff_;
   usage_model::UsageSnapshot displayedSnapshot_;
   uint32_t displayedTimeoutSec_ = backlight_timer::kDefaultTimeoutSec;
+  uint32_t displayedPollSec_ = config_store::kDefaultPollIntervalSec;
+  int16_t displayScroll_ = 0;
+  uint32_t pollCountdownSec_ = UINT32_MAX;
   bool hasDisplayedSnapshot_ = false;
   bool hasPresentedScreen_ = false;
   esp_timer_handle_t backlightTimer_ = nullptr;

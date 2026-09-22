@@ -128,6 +128,20 @@ bool NetworkClient::isConnected() const {
   return WiFi.status() == WL_CONNECTED;
 }
 
+void NetworkClient::setPollIntervalSec(uint32_t pollIntervalSec) {
+  config_.pollIntervalSec = pollIntervalSec;
+}
+
+uint32_t NetworkClient::pollRemainingMs(uint32_t nowMs) const {
+  if (!configured_ || !timeReady_ || WiFi.status() != WL_CONNECTED) {
+    return UINT32_MAX;
+  }
+  if (isDue(nowMs, nextPollMs_)) {
+    return 0;
+  }
+  return nextPollMs_ - nowMs;
+}
+
 void NetworkClient::report(const char *status, StatusHandler statusHandler,
                            void *context) {
   if (status == nullptr || strcmp(lastStatus_, status) == 0) {

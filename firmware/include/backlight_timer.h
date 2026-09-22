@@ -11,13 +11,41 @@ constexpr uint32_t kTimeoutOptionsSec[] = {15,  30,   60,   120, 300,
 constexpr size_t kTimeoutOptionCount =
     sizeof(kTimeoutOptionsSec) / sizeof(kTimeoutOptionsSec[0]);
 
+// New Display-tab sliders (esp32-ui-style.md): 0-59 minutes + 0-24 hours.
+// The total timeout is hours*3600 + minutes*60. 0 minutes + 0 hours disables
+// the auto-off (always on). Legacy fixed choices (15s/30s/...) stay valid so
+// stored records keep working; the sliders only produce minute-quantized
+// values when the user drags them.
+constexpr uint32_t kSleepMinutesMax = 59;
+constexpr uint32_t kSleepHoursMax = 24;
+constexpr uint32_t kSleepTimeoutMaxSec =
+    kSleepHoursMax * 3600 + kSleepMinutesMax * 60; // 89940
+// Poll-interval slider: 60-600 seconds in 60-second steps.
+constexpr uint32_t kPollSliderMinSec = 60;
+constexpr uint32_t kPollSliderMaxSec = 600;
+constexpr uint32_t kPollSliderStepSec = 60;
+
 inline bool isSupportedTimeout(uint32_t timeoutSec) {
-  for (size_t index = 0; index < kTimeoutOptionCount; ++index) {
-    if (kTimeoutOptionsSec[index] == timeoutSec) {
-      return true;
-    }
-  }
-  return false;
+  return timeoutSec <= kSleepTimeoutMaxSec;
+}
+
+inline uint32_t sleepMinutesPart(uint32_t timeoutSec) {
+  return (timeoutSec % 3600) / 60;
+}
+
+inline uint32_t sleepHoursPart(uint32_t timeoutSec) {
+  return timeoutSec / 3600;
+}
+
+inline uint32_t sleepTimeoutFromParts(uint32_t minutes, uint32_t hours) {
+  if (minutes > kSleepMinutesMax) minutes = kSleepMinutesMax;
+  if (hours > kSleepHoursMax) hours = kSleepHoursMax;
+  return hours * 3600 + minutes * 60;
+}
+
+inline bool isValidPollSlider(uint32_t pollSec) {
+  return pollSec >= kPollSliderMinSec && pollSec <= kPollSliderMaxSec &&
+         pollSec % kPollSliderStepSec == 0;
 }
 
 // Pure state model shared by the ESP timer callback and native tests. All

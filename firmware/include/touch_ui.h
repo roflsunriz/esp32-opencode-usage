@@ -47,7 +47,16 @@ constexpr int16_t kCalibTargetY1 = 215;
 constexpr int16_t kCalibMinSpan = 1000;
 
 enum class Tab : uint8_t { kUsage, kDisplay };
-enum class ActionKind : uint8_t { kNone, kUsageTab, kDisplayTab, kTimeout };
+enum class ActionKind : uint8_t {
+  kNone,
+  kUsageTab,
+  kDisplayTab,
+  kTimeout,
+  kSleepMinutes,
+  kSleepHours,
+  kPollInterval,
+  kDisplayScroll
+};
 
 struct Action {
   Action(ActionKind selectedKind = ActionKind::kNone,
@@ -257,31 +266,6 @@ inline int16_t pressureThresholdFor(int16_t weakestPressure) {
   return threshold;
 }
 
-inline Action hitTest(Tab activeTab, uint16_t x, uint16_t y) {
-  if (y < kTabHeight) {
-    return Action(
-        x < kTabWidth ? ActionKind::kUsageTab : ActionKind::kDisplayTab, 0);
-  }
-  if (activeTab != Tab::kDisplay || y < kGridTop || y >= kFooterTop) {
-    return Action();
-  }
-  for (uint16_t row = 0; row < kGridRows; ++row) {
-    const uint16_t top = kGridTop + row * (kButtonHeight + kGridGapY);
-    if (y < top || y >= top + kButtonHeight) {
-      continue;
-    }
-    for (uint16_t column = 0; column < kGridColumns; ++column) {
-      const uint16_t left = kGridLeft + column * (kButtonWidth + kGridGapX);
-      if (x >= left && x < left + kButtonWidth) {
-        const size_t index = row * kGridColumns + column;
-        return Action(ActionKind::kTimeout,
-                      backlight_timer::kTimeoutOptionsSec[index]);
-      }
-    }
-  }
-  return Action();
-}
-
 inline const char *timeoutLabel(uint32_t timeoutSec) {
   switch (timeoutSec) {
   case 15:
@@ -305,6 +289,145 @@ inline const char *timeoutLabel(uint32_t timeoutSec) {
   default:
     return "?";
   }
+}
+
+// New slider-based Display-tab settings (esp32-ui-style.md). The tab content
+// is taller than the visible area, so the controller keeps a scroll offset.
+// Slider tracks share one horizontal geometry; each row is identified by its
+// content-space center Y.
+constexpr int16_t kSliderTrackX0 = 14;
+constexpr int16_t kSliderTrackX1 = 296;
+constexpr int16_t kSliderThumbHalfW = 8;
+constexpr int16_t kSliderTouchHalfH = 14;
+constexpr int16_t kSliderMinutesY = 78;
+constexpr int16_t kSliderHoursY = 128;
+constexpr int16_t kSliderPollY = 178;
+constexpr int16_t kDisplayContentHeight = 240;
+constexpr int16_t kDisplayVisibleHeight = kFooterTop - kTabHeight; // 188
+constexpr int16_t kDisplayScrollMax =
+    kDisplayContentHeight - kDisplayVisibleHeight; // 52
+// Scrollbar on the right edge of the Display tab. Tap above/below the thumb
+// to page the content; the sliders handle their own taps.
+constexpr int16_t kScrollBarX0 = 306;
+constexpr int16_t kScrollBarY0 = 44;
+constexpr int16_t kScrollBarY1 = 224;
+constexpr int16_t kScrollPage = 40;
+
+inline int16_t clampScroll(int32_t scroll) {
+  if (scroll < 0) return 0;
+  if (scroll > kDisplayScrollMax) return kDisplayScrollMax;
+  return static_cast<int16_t>(scroll);
+}
+
+// Maps a screen X tap to a slider value, quantized to step. minV == maxV is
+// treated as a fixed slider.
+inline uint32_t sliderValueFromX(int16_t x, uint32_t minV, uint32_t maxV,
+                                 uint32_t step) {
+  if (maxV <= minV || step == 0) return minV;
+  int32_t clamped = x;
+  if (clamped < kSliderTrackX0) clamped = kSliderTrackX0;
+  if (clamped > kSliderTrackX1) clamped = kSliderTrackX1;
+  const uint32_t trackW =
+      static_cast<uint32_t>(kSliderTrackX1 - kSliderTrackX0);
+  const uint32_t offset = static_cast<uint32_t>(clamped - kSliderTrackX0);
+  const uint32_t range = maxV - minV;
+  const uint32_t steps = range / step;
+  uint32_t index =
+      static_cast<uint32_t>((static_cast<uint64_t>(offset) * steps +
+                             trackW / 2) /
+                            trackW);
+  if (index > steps) index = steps;
+  return minV + index * step;
+}
+
+inline int16_t sliderXFromValue(uint32_t value, uint32_t minV,
+                                uint32_t maxV) {
+  if (maxV <= minV) return kSliderTrackX0;
+  if (value < minV) value = minV;
+  if (value > maxV) value = maxV;
+  const uint32_t trackW =
+      static_cast<uint32_t>(kSliderTrackX1 - kSliderTrackX0);
+  const uint32_t range = maxV - minV;
+  return static_cast<int16_t>(
+      kSliderTrackX0 +
+      (static_cast<uint64_t>(value - minV) * trackW + range / 2) / range);
+}
+
+// Hit-tests the Display-tab slider rows. contentY is the tap position in
+// content space (screenY + scrollOffset). Returns kNone for taps outside the
+// slider rows; scrolling drags are handled by the controller.
+inline Action hitTestDisplaySliders(int16_t x, int16_t contentY) {
+  if (x < kSliderTrackX0 - kSliderThumbHalfW ||
+      x > kSliderTrackX1 + kSliderThumbHalfW) {
+    return Action();
+  }
+  if (contentY >= kSliderMinutesY - kSliderTouchHalfH &&
+      contentY < kSliderMinutesY + kSliderTouchHalfH) {
+    return Action(ActionKind::kSleepMinutes,
+                  sliderValueFromX(x, 0,
+                                   backlight_timer::kSleepMinutesMax, 1));
+  }
+  if (contentY >= kSliderHoursY - kSliderTouchHalfH &&
+      contentY < kSliderHoursY + kSliderTouchHalfH) {
+    return Action(ActionKind::kSleepHours,
+                  sliderValueFromX(x, 0, backlight_timer::kSleepHoursMax,
+                                   1));
+  }
+  if (contentY >= kSliderPollY - kSliderTouchHalfH &&
+      contentY < kSliderPollY + kSliderTouchHalfH) {
+    return Action(ActionKind::kPollInterval,
+                  sliderValueFromX(x, backlight_timer::kPollSliderMinSec,
+                                   backlight_timer::kPollSliderMaxSec,
+                                   backlight_timer::kPollSliderStepSec));
+  }
+  return Action();
+}
+
+inline Action hitTestDisplayTab(uint16_t x, uint16_t y, int16_t scroll) {
+  const int16_t clamped = clampScroll(scroll);
+  // Scrollbar first so it wins over the slider thumb end zone.
+  if (x >= static_cast<uint16_t>(kScrollBarX0) && x < kDisplayWidth &&
+      y >= kScrollBarY0 && y < kScrollBarY1) {
+    const int16_t trackH = kScrollBarY1 - kScrollBarY0;
+    const int16_t thumbH = static_cast<int16_t>(
+        (static_cast<int32_t>(kDisplayVisibleHeight) * trackH) /
+        kDisplayContentHeight);
+    const int16_t travel = trackH - thumbH;
+    const int16_t thumbY0 =
+        travel <= 0 || kDisplayScrollMax <= 0
+            ? kScrollBarY0
+            : static_cast<int16_t>(
+                  kScrollBarY0 +
+                  (static_cast<int32_t>(clamped) * travel) /
+                      kDisplayScrollMax);
+    int16_t target = clamped;
+    if (y < thumbY0) {
+      target = clamped - kScrollPage;
+    } else if (y >= thumbY0 + thumbH) {
+      target = clamped + kScrollPage;
+    } else {
+      return Action();
+    }
+    return Action(ActionKind::kDisplayScroll,
+                  static_cast<uint32_t>(clampScroll(target)));
+  }
+  if (y < kGridTop || y >= kFooterTop) {
+    return Action();
+  }
+  return hitTestDisplaySliders(static_cast<int16_t>(x),
+                               static_cast<int16_t>(y) + clamped);
+}
+
+inline Action hitTest(Tab activeTab, uint16_t x, uint16_t y,
+                      int16_t scroll = 0) {
+  if (y < kTabHeight) {
+    return Action(
+        x < kTabWidth ? ActionKind::kUsageTab : ActionKind::kDisplayTab, 0);
+  }
+  if (activeTab != Tab::kDisplay) {
+    return Action();
+  }
+  return hitTestDisplayTab(x, y, scroll);
 }
 
 } // namespace touch_ui

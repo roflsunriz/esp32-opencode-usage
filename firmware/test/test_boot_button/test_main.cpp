@@ -57,24 +57,33 @@ void test_startup_held_button_is_ignored_and_clock_wrap_is_safe() {
 }
 
 void test_flipped_touch_maps_all_buttons_and_tabs() {
-  const uint16_t xPositions[] = {55, 160, 265};
-  const uint16_t yPositions[] = {70, 126, 182};
-  for (uint16_t row = 0; row < 3; ++row) {
-    for (uint16_t column = 0; column < 3; ++column) {
-      const uint16_t rawX = touch_ui::kRawXMin +
-                            (239 - yPositions[row]) *
-                                (touch_ui::kRawXMax - touch_ui::kRawXMin) / 239;
-      const uint16_t rawY = touch_ui::kRawYMin +
-                            (319 - xPositions[column]) *
-                                (touch_ui::kRawYMax - touch_ui::kRawYMin) / 319;
-      const auto point = touch_ui::mapPoint(rawX, rawY, true);
-      const auto action =
-          touch_ui::hitTest(touch_ui::Tab::kDisplay, point.x, point.y);
-      TEST_ASSERT_EQUAL_UINT32(
-          backlight_timer::kTimeoutOptionsSec[row * 3 + column],
-          action.timeoutSec);
-    }
+  // The Display tab now uses sliders instead of the retired 3x3 grid.
+  const uint16_t centerX = static_cast<uint16_t>(
+      (touch_ui::kSliderTrackX0 + touch_ui::kSliderTrackX1) / 2);
+  const uint16_t yRows[] = {
+      touch_ui::kSliderMinutesY, touch_ui::kSliderHoursY,
+      touch_ui::kSliderPollY,
+  };
+  const touch_ui::ActionKind expectedKinds[] = {
+      touch_ui::ActionKind::kSleepMinutes, touch_ui::ActionKind::kSleepHours,
+      touch_ui::ActionKind::kPollInterval,
+  };
+  for (uint8_t index = 0; index < 3; ++index) {
+    const auto action = touch_ui::hitTest(touch_ui::Tab::kDisplay, centerX,
+                                          yRows[index]);
+    TEST_ASSERT_EQUAL_INT(static_cast<int>(expectedKinds[index]),
+                          static_cast<int>(action.kind));
   }
+  // A flipped board still lands on the same rows: raw (2000, 2000) maps to
+  // screen (169, 124), inside the hours slider row.
+  const auto flipped = touch_ui::mapPoint(2000, 2000, true);
+  TEST_ASSERT_EQUAL_UINT16(169, flipped.x);
+  TEST_ASSERT_EQUAL_UINT16(124, flipped.y);
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(touch_ui::ActionKind::kSleepHours),
+      static_cast<int>(
+          touch_ui::hitTest(touch_ui::Tab::kDisplay, flipped.x, flipped.y)
+              .kind));
   const auto topLeft = touch_ui::mapPoint(4095, 4095, true);
   TEST_ASSERT_EQUAL_UINT16(0, topLeft.x);
   TEST_ASSERT_EQUAL_UINT16(0, topLeft.y);

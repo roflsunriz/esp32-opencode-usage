@@ -12,8 +12,15 @@ public:
   using StatusHandler = void (*)(const char *status, void *context);
 
   void setConfig(const config_store::WiFiConfig &config);
+  // Updates only the poll cadence without dropping the Wi-Fi connection.
+  // Used by the on-device poll-interval slider.
+  void setPollIntervalSec(uint32_t pollIntervalSec);
   bool isConfigured() const { return configured_; }
   bool isConnected() const;
+  // Milliseconds until the next scheduled poll, or UINT32_MAX when the
+  // cadence is unknown (unconfigured, offline, or time not synchronized).
+  // Returns 0 when a poll is due or in flight.
+  uint32_t pollRemainingMs(uint32_t nowMs) const;
   void tick(uint32_t nowMs, PayloadHandler payloadHandler,
             StatusHandler statusHandler, void *context);
 

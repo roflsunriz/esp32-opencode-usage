@@ -149,8 +149,10 @@ bool DisplayController::consumeBootCalibration() {
 }
 
 void DisplayController::redraw(const usage_model::UsageSnapshot *snapshot,
-                               uint32_t timeoutSec) {
+                                uint32_t timeoutSec,
+                                uint32_t pollIntervalSec) {
   displayedTimeoutSec_ = timeoutSec;
+  displayedPollSec_ = pollIntervalSec;
   if (snapshot != nullptr && snapshot->valid) {
     displayedSnapshot_ = *snapshot;
     hasDisplayedSnapshot_ = true;
@@ -442,7 +444,8 @@ bool DisplayController::pollTouch(TouchEvent &event) {
   }
   event.kind = TouchEventKind::kTap;
   event.hasCoordinates = true;
-  event.action = touch_ui::hitTest(activeTab_, event.point.x, event.point.y);
+  event.action = touch_ui::hitTest(activeTab_, event.point.x, event.point.y,
+                                   displayScroll_);
   return true;
 }
 
@@ -563,36 +566,81 @@ void DisplayController::drawHeader(TFT_eSPI &surface) {
 }
 
 void DisplayController::drawDisplaySettings(TFT_eSPI &surface,
-                                            uint32_t selectedTimeoutSec) {
-  for (uint16_t row = 0; row < touch_ui::kGridRows; ++row) {
-    for (uint16_t column = 0; column < touch_ui::kGridColumns; ++column) {
-      const size_t index = row * touch_ui::kGridColumns + column;
-      const uint32_t timeoutSec = backlight_timer::kTimeoutOptionsSec[index];
-      const int16_t left =
-          touch_ui::kGridLeft +
-          column * (touch_ui::kButtonWidth + touch_ui::kGridGapX);
-      const int16_t top = touch_ui::kGridTop +
-                          row * (touch_ui::kButtonHeight + touch_ui::kGridGapY);
-      const bool selected = timeoutSec == selectedTimeoutSec;
-      const uint16_t color = selected ? kSelectedButton : kButton;
-      surface.fillRoundRect(left, top, touch_ui::kButtonWidth,
-                            touch_ui::kButtonHeight, 5, color);
-      surface.drawRoundRect(left, top, touch_ui::kButtonWidth,
-                            touch_ui::kButtonHeight, 5, ILI9341_WHITE);
-      const char *label = touch_ui::timeoutLabel(timeoutSec);
-      surface.setTextColor(ILI9341_WHITE, color);
-      surface.setTextSize(2);
-      const int16_t textWidth = static_cast<int16_t>(strlen(label) * 12);
-      surface.setCursor(left + (touch_ui::kButtonWidth - textWidth) / 2,
-                        top + 17);
-      surface.print(label);
+                                             uint32_t selectedTimeoutSec) {
+  const uint32_t minutes =
+      backlight_timer::sleepMinutesPart(selectedTimeoutSec);
+  const uint32_t hours = backlight_timer::sleepHoursPart(selectedTimeoutSec);
+  const int16_t scroll = touch_ui::clampScroll(displayScroll_);
+  auto contentY = [scroll](int16_t y) -> int16_t {
+    return static_cast<int16_t>(y - scroll);
+  };
+  auto drawSlider = [&](int16_t centerY, uint32_t value, uint32_t minV,
+                        uint32_t maxV) {
+    const int16_t y = contentY(centerY);
+    if (y < touch_ui::kTabHeight - 8 ||
+        y > touch_ui::kFooterTop + 8) {
+      return;
     }
+    surface.drawRect(touch_ui::kSliderTrackX0, y - 2,
+                     touch_ui::kSliderTrackX1 - touch_ui::kSliderTrackX0,
+                     5, ILI9341_WHITE);
+    const int16_t thumbX = touch_ui::sliderXFromValue(value, minV, maxV);
+    surface.fillRect(
+        touch_ui::kSliderTrackX0, y - 2,
+        static_cast<int16_t>(thumbX - touch_ui::kSliderTrackX0), 5,
+        kActiveTab);
+    surface.fillRect(thumbX - 6, y - 8, 12, 17, ILI9341_WHITE);
+    surface.fillRect(thumbX - 4, y - 6, 8, 13, kButton);
+  };
+  auto drawLine = [&](int16_t y, const char *text, uint16_t color) {
+    const int16_t visible = contentY(y);
+    if (visible < touch_ui::kTabHeight ||
+        visible > touch_ui::kFooterTop - 10) {
+      return;
+    }
+    drawTextClipped(surface, text, 6, visible, 1, color,
+                    touch_ui::kDisplayWidth - 30);
+  };
+  char line[56] = {};
+  if (selectedTimeoutSec == 0) {
+    snprintf(line, sizeof(line), "Off after: always on");
+  } else {
+    snprintf(line, sizeof(line), "Off after: %uh %02um", hours, minutes);
   }
-  surface.setTextColor(ILI9341_LIGHTGREY, kBackground);
-  surface.setTextSize(1);
-  surface.setCursor(6, 215);
-  surface.print("Selected: ");
-  surface.print(touch_ui::timeoutLabel(selectedTimeoutSec));
+  drawLine(46, line, ILI9341_WHITE);
+  snprintf(line, sizeof(line), "Minutes 0-59: %um", minutes);
+  drawLine(64, line, ILI9341_LIGHTGREY);
+  drawSlider(touch_ui::kSliderMinutesY, minutes, 0,
+             backlight_timer::kSleepMinutesMax);
+  snprintf(line, sizeof(line), "Hours 0-24: %uh", hours);
+  drawLine(114, line, ILI9341_LIGHTGREY);
+  drawSlider(touch_ui::kSliderHoursY, hours, 0,
+             backlight_timer::kSleepHoursMax);
+  snprintf(line, sizeof(line), "Update 60-600s: %us", displayedPollSec_);
+  drawLine(164, line, ILI9341_LIGHTGREY);
+  drawSlider(touch_ui::kSliderPollY, displayedPollSec_,
+             backlight_timer::kPollSliderMinSec,
+             backlight_timer::kPollSliderMaxSec);
+  drawLine(196, "0m 0h = always on", ILI9341_LIGHTGREY);
+  drawLine(208, "Tap a track to set", ILI9341_LIGHTGREY);
+  // Scrollbar on the right edge.
+  const int16_t trackH =
+      touch_ui::kScrollBarY1 - touch_ui::kScrollBarY0;
+  surface.drawRect(touch_ui::kScrollBarX0, touch_ui::kScrollBarY0, 12,
+                   trackH, kBarBackground);
+  const int16_t thumbH = static_cast<int16_t>(
+      (static_cast<int32_t>(touch_ui::kDisplayVisibleHeight) * trackH) /
+      touch_ui::kDisplayContentHeight);
+  const int16_t travel = trackH - thumbH;
+  const int16_t thumbY0 =
+      travel <= 0 || touch_ui::kDisplayScrollMax <= 0
+          ? touch_ui::kScrollBarY0
+          : static_cast<int16_t>(
+                touch_ui::kScrollBarY0 +
+                (static_cast<int32_t>(scroll) * travel) /
+                    touch_ui::kDisplayScrollMax);
+  surface.fillRect(touch_ui::kScrollBarX0 + 2, thumbY0, 8, thumbH,
+                   ILI9341_WHITE);
 }
 
 void DisplayController::drawUsage(TFT_eSPI &surface) {
@@ -610,7 +658,18 @@ void DisplayController::drawUsage(TFT_eSPI &surface) {
 void DisplayController::drawStatus(TFT_eSPI &surface) {
   surface.fillRect(0, kFooterTop, touch_ui::kDisplayWidth,
                    touch_ui::kDisplayHeight - kFooterTop, kBackground);
-  drawTextClipped(surface, canvasReady_ ? status_ : "Display memory low - reboot",
+  char composed[96] = {};
+  snprintf(composed, sizeof(composed), "%s", status_);
+  if (pollCountdownSec_ != UINT32_MAX) {
+    char suffix[24] = {};
+    if (pollCountdownSec_ == 0) {
+      snprintf(suffix, sizeof(suffix), " - polling...");
+    } else {
+      snprintf(suffix, sizeof(suffix), " - next %us", pollCountdownSec_);
+    }
+    strncat(composed, suffix, sizeof(composed) - strlen(composed) - 1);
+  }
+  drawTextClipped(surface, canvasReady_ ? composed : "Display memory low - reboot",
                   5, kFooterTop + 2, 1,
                   canvasReady_ ? statusColor_ : ILI9341_RED,
                   touch_ui::kDisplayWidth - 10);
@@ -777,14 +836,44 @@ void DisplayController::showUsageTab() {
   presentScreen();
 }
 
-void DisplayController::showDisplayTab(uint32_t selectedTimeoutSec) {
+void DisplayController::showDisplayTab(uint32_t selectedTimeoutSec,
+                                        uint32_t pollIntervalSec) {
   const bool changed = activeTab_ != touch_ui::Tab::kDisplay ||
-                       displayedTimeoutSec_ != selectedTimeoutSec;
+                       displayedTimeoutSec_ != selectedTimeoutSec ||
+                       displayedPollSec_ != pollIntervalSec;
   activeTab_ = touch_ui::Tab::kDisplay;
   displayedTimeoutSec_ = selectedTimeoutSec;
+  displayedPollSec_ = pollIntervalSec;
+  displayScroll_ = touch_ui::clampScroll(displayScroll_);
   if (!hasPresentedScreen_ || changed) {
     presentScreen();
   }
+}
+
+void DisplayController::setDisplayScroll(int16_t scroll) {
+  const int16_t clamped = touch_ui::clampScroll(scroll);
+  if (clamped == displayScroll_) {
+    return;
+  }
+  displayScroll_ = clamped;
+  if (hasPresentedScreen_ && activeTab_ == touch_ui::Tab::kDisplay) {
+    presentScreen();
+  }
+}
+
+bool DisplayController::updatePollCountdown(uint32_t remainingMs,
+                                            uint32_t pollIntervalSec) {
+  displayedPollSec_ = pollIntervalSec;
+  const uint32_t seconds =
+      remainingMs == UINT32_MAX ? UINT32_MAX : (remainingMs + 999) / 1000;
+  if (seconds == pollCountdownSec_) {
+    return false;
+  }
+  pollCountdownSec_ = seconds;
+  if (hasPresentedScreen_ && activeTab_ == touch_ui::Tab::kUsage) {
+    presentScreen();
+  }
+  return true;
 }
 
 // Diagnostic readback from the real ILI9341 GRAM. A row buffer avoids
