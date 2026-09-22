@@ -122,6 +122,8 @@ private:
   bool backlightTimerReady_ = false;
   touch_ui::Tab activeTab_ = touch_ui::Tab::kUsage;
   touch_ui::ReleaseLatch touchLatch_;
+  touch_ui::ActionKind lastDragKind_ = touch_ui::ActionKind::kNone;
+  uint32_t lastDragValue_ = 0;
   boot_button::Model bootButton_;
   uint32_t pendingBootClicks_ = 0;
   uint32_t pendingBootCalibrations_ = 0;

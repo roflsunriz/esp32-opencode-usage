@@ -415,6 +415,34 @@ bool DisplayController::pollTouch(TouchEvent &event) {
   touchWakePending_ = false;
   portEXIT_CRITICAL(&backlightMux_);
   if (!pending) {
+    // Drag continuation: while a contact persists on the Display tab,
+    // report slider value changes without waiting for release, so a pen
+    // pressed against the screen can drag a slider. Only quantized value
+    // changes are reported, and the latch still guards the next contact.
+    if (!penLow) {
+      lastDragKind_ = touch_ui::ActionKind::kNone;
+    } else if (touchLatch_.isLatched() && backlightOn() &&
+               activeTab_ == touch_ui::Tab::kDisplay) {
+      touch_ui::Point dragPoint;
+      if (readTouchPoint(dragPoint)) {
+        wakeBacklight();
+        const touch_ui::Action dragAction = touch_ui::hitTest(
+            activeTab_, dragPoint.x, dragPoint.y, displayScroll_);
+        if ((dragAction.kind == touch_ui::ActionKind::kSleepMinutes ||
+             dragAction.kind == touch_ui::ActionKind::kSleepHours ||
+             dragAction.kind == touch_ui::ActionKind::kPollInterval) &&
+            (dragAction.kind != lastDragKind_ ||
+             dragAction.timeoutSec != lastDragValue_)) {
+          lastDragKind_ = dragAction.kind;
+          lastDragValue_ = dragAction.timeoutSec;
+          event.kind = TouchEventKind::kTap;
+          event.hasCoordinates = true;
+          event.point = dragPoint;
+          event.action = dragAction;
+          return true;
+        }
+      }
+    }
     return false;
   }
   if (!touchLatch_.accept()) {
@@ -446,6 +474,14 @@ bool DisplayController::pollTouch(TouchEvent &event) {
   event.hasCoordinates = true;
   event.action = touch_ui::hitTest(activeTab_, event.point.x, event.point.y,
                                    displayScroll_);
+  if (event.action.kind == touch_ui::ActionKind::kSleepMinutes ||
+      event.action.kind == touch_ui::ActionKind::kSleepHours ||
+      event.action.kind == touch_ui::ActionKind::kPollInterval) {
+    lastDragKind_ = event.action.kind;
+    lastDragValue_ = event.action.timeoutSec;
+  } else {
+    lastDragKind_ = touch_ui::ActionKind::kNone;
+  }
   return true;
 }
 
