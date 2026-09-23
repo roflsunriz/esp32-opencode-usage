@@ -217,3 +217,9 @@ python scripts/capture-lcd.py --port COM3 --output .private/lcd.png
 - `pollTouch` を改め、PENIRQがHIGH（指なし）のグリッチは無音で捨て、読み取り成功後のみバックライトを更新する。消灯中の実接触は従来どおり起床する。
 - 無接触30秒で0件、30秒放置で `backlightRemainingMs` が約31秒減少（期限更新なし）、直接HTTPS取得の成立（`hasUsage=false`→`true`）を確認した。
 - Display/Usageタブの交互タップ34件が全て正しく判定され、`others` は0件だった。
+
+## Dependabot 自動処理（2026-09-23）
+
+`.github/workflows/dependabot-automation.yml` を actionlint で検査し、PR 用 workflow 名（CI）と一致することを確認する。Dependabot の patch／minor かつ全 PR チェック成功の場合だけ取り込み、major・古い SHA・再失敗は残す。
+
+実際の Dependabot PR がまだない場合、動作経路は未検証として扱う。実 PR 発生後に自動化ジョブ、CI の再試行、マージ結果を確認する。

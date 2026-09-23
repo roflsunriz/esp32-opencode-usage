@@ -138,3 +138,7 @@ Python側の実行時USBはpySerialです。Node.js 24は開発用のfake fixtur
 - [セキュリティ](SECURITY.md)
 
 本プロジェクトはOpenCode非公式です。公式コンソール、認証方式、HTTPS証明書、使用量応答の変更で更新が必要になる場合があります。
+
+## 依存更新の自動処理
+
+Dependabot は対象の依存関係を毎週確認します。patch／minor 更新は PR のチェック（CI）が成功した後に自動で squash merge されます。CI の失敗ジョブは 1 回だけ再実行します。再失敗した PR は残して手動で修正します。major 更新は手動で確認します。
