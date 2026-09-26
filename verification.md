@@ -10,6 +10,8 @@
 - COM7実機は製品の `DeviceConnection` で1秒以内にping互換（`firmware=opencode-go-lcd`・`setupSchema=3`）を確認し、直接取得の成功（`renderCount` 1→2・更新時刻つき3期間）と `OpenCode updated` をUSBで確認した。15分の監視では再発しなかった。
 - よって取得時点の一時的な応答異常（空本体・未知形式・超過・宣言長未満の途中切断）が有力だが、旧実装には原因特定を不能にする3欠陥があった。超過と不正が同一文言、宣言長不一致の途中切断を不正として報告、不正時に診断を出さない。
 - 修正は状態文の分離（超過は `OpenCode response too large`）、宣言長不一致の途中切断を `OpenCode HTTPS failed`（通信診断付き）へ変更、応答不正・超過時に内容・認証・ヘッダー値を含まない診断（`component":"opencode_response`、HTTP状態・宣言長・受信バイト・内容種別）をUSB送出とした。nativeは5件追加で全46件、ホスト37件、ESP32ビルドが成功した。
+- COM7基板（ESP32-D0WD-V3・4MB）へ全flash退避（4,194,304バイト、SHA-256 `7EFC8DBEDF52…`、`.private/backups/before-response-status-20260926.bin`）と `--after no_reset`／`--before no_reset` での `verify-flash` のdigest一致を確認してから、アプリ領域のみ更新した（NVS保持）。自動リセット接続は `Wrong boot mode detected (0x13)` のため、BOOT保持中に読み出し・書き込みを行った。書き込み直後はBOOT保持のまま書込待機になるため、離してRSTを押して通常起動へ戻した。
+- 書き込み後は製品の `DeviceConnection` で1秒以内にping互換を確認し、NVS設定の保持（消灯28800秒・点灯）と新ファームでの直接取得の再開（`lastDirectUpdate`つき3期間）を確認した。
 - 新状態文の実機表示は失敗注入ができないため未検証で、次回発生時のUSB診断で確認する。再試行の自動化は頻度が分かってから判断する。
 
 ## v0.4.0リリース（2026-09-23）
