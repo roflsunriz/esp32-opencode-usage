@@ -7,6 +7,7 @@
 ### Fixed
 
 - CI と Dependabot の分類の実行順が前後しても更新を取りこぼさないよう、同じ PR 番号と head SHA を再照合する経路を追加した。
+- 取得失敗の原因をLCDとUSB記録で区別できるように、応答超過と応答不正の状態表示を分離し（`OpenCode response too large`／`OpenCode response invalid`）、応答不正・超過時に内容・認証・ヘッダー値を含まない診断（HTTP状態・宣言長・受信バイト・内容種別）をUSBへ送出するようにした。宣言長より短い本体の到着は通信の途中切断として扱い、`OpenCode HTTPS failed` として報告するようにした。
 
 ### Changed
 

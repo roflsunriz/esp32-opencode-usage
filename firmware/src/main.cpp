@@ -775,6 +775,7 @@ void onNetworkStatus(const char *status, void * /*context*/) {
       status != nullptr && (strstr(status, "failed") != nullptr ||
                             strstr(status, "rejected") != nullptr ||
                             strstr(status, "status ") != nullptr ||
+                            strstr(status, "too large") != nullptr ||
                             strstr(status, "invalid") != nullptr);
   display.showStatus(status == nullptr ? "Network" : status,
                      failed ? ILI9341_RED : ILI9341_YELLOW);

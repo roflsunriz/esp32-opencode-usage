@@ -79,6 +79,37 @@ ESP32は3期間を一括検証してから表示へ反映します。一部の�
 
 ESP32が公式HTTPSサービスから直接取得して表示した場合、ACKの更新時刻をUSB worker経由でPCへ返します。操作画面はこの値を「ESP32の直接更新を確認」と表示し、PCを終了できる判断材料にします。
 
+### 取得失敗の状態と診断
+
+直接取得の失敗はLCDの状態行へ表示します（赤は失敗）。
+
+| 状態 | 意味 |
+| ---- | ---- |
+| `OpenCode response invalid` | 200応答の形式が未知（大きさ以外の不一致） |
+| `OpenCode response too large` | 応答が4KiB上限を超過 |
+| `OpenCode HTTPS failed` | TLS・接続・途中切断。宣言長より短い本体も含む |
+| `OpenCode auth failed - login` | 認証切れ（401・403・転送・HTML応答）。PCから再ログインと再保存が必要 |
+| `OpenCode query invalid` | 取得先の拒否（404など）。ワークスペースを確認する |
+
+応答不正・超過のとき、本体は内容・認証・ヘッダー値を含まない診断フレームをUSBへ送ります。
+
+```json
+{
+  "version": 1,
+  "type": "diagnostic",
+  "component": "opencode_response",
+  "result": "invalid",
+  "httpCode": 200,
+  "contentLength": 796,
+  "bodyBytes": 100,
+  "contentTypeLength": 16,
+  "isJson": true,
+  "isHtml": false
+}
+```
+
+`result` は `invalid`（形式不正）か `too_large`（超過）です。`contentLength` はサーバー宣言長（なしは-1）です。
+
 ## USB workerプロトコル
 
 製品のUSB通信は `host/serial-worker.py` をPython/pySerialで起動して行います。Bunはworkerの標準入出力だけを使い、ネイティブNode bindingへ依存しません。

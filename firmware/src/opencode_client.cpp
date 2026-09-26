@@ -113,6 +113,18 @@ bool Client::getTransportDiagnostic(TransportDiagnostic &diagnostic) const {
   return true;
 }
 
+bool Client::getResponseDiagnostic(
+    ResponseDiagnostic &diagnostic) const {
+  diagnostic.httpCode = lastHttpCode_;
+  diagnostic.contentLength = lastContentLength_;
+  diagnostic.bodyBytes = lastBodyBytes_;
+  diagnostic.contentTypeLength =
+      static_cast<unsigned>(strlen(contentType_));
+  diagnostic.isJson = isJsonResponse();
+  diagnostic.isHtml = startsWithIgnoreCase(contentType_, "text/html");
+  return true;
+}
+
 void Client::clearTransportDiagnostic() {
   memset(&transportDiagnostic_, 0, sizeof(transportDiagnostic_));
   hasTransportDiagnostic_ = false;
@@ -141,6 +153,9 @@ Result Client::getStatus(const config_store::WiFiConfig &config,
                          size_t maxResponseBytes) {
   clearTransportDiagnostic();
   resetResponseMetadata();
+  lastHttpCode_ = 0;
+  lastContentLength_ = -1;
+  lastBodyBytes_ = 0;
   if (config.authCookie[0] == '\0' || config.workspace[0] == '\0' ||
       maxResponseBytes == 0 || maxResponseBytes > kMaxUsageResponseBytes ||
       snprintf(requestUrl_, sizeof(requestUrl_), "%s%s", kOpenCodeOrigin,
@@ -162,6 +177,7 @@ Result Client::getStatus(const config_store::WiFiConfig &config,
   http.addHeader("Cookie", config.authCookie);
   http.addHeader("x-org-id", config.workspace);
   const int statusCode = http.GET();
+  lastHttpCode_ = statusCode;
   if (statusCode <= 0) {
     recordTransportFailure(statusCode);
     http.end();
@@ -182,6 +198,7 @@ Result Client::getStatus(const config_store::WiFiConfig &config,
   snprintf(contentType_, sizeof(contentType_), "%s",
            receivedContentType.c_str());
   const int contentLength = http.getSize();
+  lastContentLength_ = contentLength;
   if (contentLength > static_cast<int>(maxResponseBytes)) {
     http.end();
     tlsClient_.stop();
@@ -193,10 +210,15 @@ Result Client::getStatus(const config_store::WiFiConfig &config,
     recordTransportFailure(bodyResult);
   http.end();
   tlsClient_.stop();
+  lastBodyBytes_ = static_cast<unsigned>(usageResponse.size());
   if (usageResponse.overflowed())
     return Result::kPayloadTooLarge;
   if (bodyResult < 0)
     return Result::kTransportFailed;
+  if (isTruncatedBody(contentLength, usageResponse.size())) {
+    recordTransportFailure(statusCode);
+    return Result::kTransportFailed;
+  }
   return usageResponse.size() == 0 || !usageResponse.valid()
              ? Result::kResponseInvalid
              : Result::kOk;

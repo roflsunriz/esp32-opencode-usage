@@ -1,5 +1,17 @@
 # 検証
 
+## response invalidの間欠表示の調査と修正（2026-09-26）
+
+所有者の報告はLCD状態行の `OpenCode response invalid` が時々出ること。文字列の出どころは `firmware/src/network_client.cpp` の取得失敗表示だけであり、PC側に同文言はない。
+
+- `bun start usage` は正常（5時間・週間・月間の3期間を取得）。
+- 実応答は796バイト・`Content-Type: application/json`・`Content-Length: 796`（ESP32相当のidentity要求時。Bun既定は `br`＋chunkedでCloudflareが付与する）。200/200の連続取得と、不正Cookie→401・不正ワークスペース→404の対応を確認した。
+- 実応答と同形（識別子のみ置換）のnativeパースは成功し、現在の形式では本体・PCとも通る（`firmware/test/test_response_status`）。
+- COM7実機は製品の `DeviceConnection` で1秒以内にping互換（`firmware=opencode-go-lcd`・`setupSchema=3`）を確認し、直接取得の成功（`renderCount` 1→2・更新時刻つき3期間）と `OpenCode updated` をUSBで確認した。15分の監視では再発しなかった。
+- よって取得時点の一時的な応答異常（空本体・未知形式・超過・宣言長未満の途中切断）が有力だが、旧実装には原因特定を不能にする3欠陥があった。超過と不正が同一文言、宣言長不一致の途中切断を不正として報告、不正時に診断を出さない。
+- 修正は状態文の分離（超過は `OpenCode response too large`）、宣言長不一致の途中切断を `OpenCode HTTPS failed`（通信診断付き）へ変更、応答不正・超過時に内容・認証・ヘッダー値を含まない診断（`component":"opencode_response`、HTTP状態・宣言長・受信バイト・内容種別）をUSB送出とした。nativeは5件追加で全46件、ホスト37件、ESP32ビルドが成功した。
+- 新状態文の実機表示は失敗注入ができないため未検証で、次回発生時のUSB診断で確認する。再試行の自動化は頻度が分かってから判断する。
+
 ## v0.4.0リリース（2026-09-23）
 
 `package.json` を0.4.0に上げ、`Unreleased` を `## [0.4.0] - 2026-09-23` に移した。mainのCI成功後に `v0.4.0` タグを公開し、Releaseワークフローが成功して公開ノートがCHANGELOGの0.4.0節と一致することを確認した。4成果物を展開し、ホストZIPの `start.cmd`・USB worker（DTR修正入り）・ファームウェアZIPの個別イメージと `firmware-full.bin`（bootloaderとアプリ領域のESP32 magic確認）・秘密情報やキャッシュを含まないことを確認した。

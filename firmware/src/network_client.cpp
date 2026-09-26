@@ -26,22 +26,15 @@ bool hasSynchronizedTime() {
          sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED;
 }
 
-const char *statusFor(opencode_client::Result result) {
+const char *responseResultFor(opencode_client::Result result) {
   switch (result) {
-  case opencode_client::Result::kAuthenticationRequired:
-    return "OpenCode auth failed - login";
-  case opencode_client::Result::kQueryRejected:
-  case opencode_client::Result::kDiscoveryFailed:
-    return "OpenCode query invalid";
   case opencode_client::Result::kPayloadTooLarge:
+    return "too_large";
   case opencode_client::Result::kResponseInvalid:
-    return "OpenCode response invalid";
-  case opencode_client::Result::kTransportFailed:
-    return "OpenCode HTTPS failed";
-  case opencode_client::Result::kOk:
-    return "OpenCode updated";
+    return "invalid";
+  default:
+    return nullptr;
   }
-  return "OpenCode response invalid";
 }
 
 void copyConfig(config_store::WiFiConfig &destination,
@@ -77,6 +70,20 @@ void writeJsonString(const char *value) {
     }
   }
   Serial.write('"');
+}
+
+void emitResponseDiagnostic(const char *result,
+                            const opencode_client::Client &client) {
+  // Redacted sizes only. Credentials, SSID, header values, and response
+  // bytes must never be written to the serial log.
+  opencode_client::ResponseDiagnostic diagnostic;
+  client.getResponseDiagnostic(diagnostic);
+  char frame[192] = {};
+  if (opencode_client::formatResponseDiagnostic(frame, sizeof(frame), result,
+                                                diagnostic) == 0) {
+    return;
+  }
+  Serial.println(frame);
 }
 
 void emitTransportDiagnostic(
@@ -220,7 +227,12 @@ void NetworkClient::tick(uint32_t nowMs, PayloadHandler payloadHandler,
         emitTransportDiagnostic(diagnostic);
       }
     }
-    report(statusFor(result), statusHandler, context);
+    const char *responseResult = responseResultFor(result);
+    if (responseResult != nullptr) {
+      emitResponseDiagnostic(responseResult, opencode_);
+    }
+    report(opencode_client::responseStatusText(result), statusHandler,
+           context);
     return;
   }
 
