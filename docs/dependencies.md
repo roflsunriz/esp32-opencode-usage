@@ -39,7 +39,7 @@ Node.js 24は開発用fake fixtureテストだけで使います。製品のホ�
 
 PlatformIOの解決結果は `platformio.ini` の固定値を基準に更新します。ESP32のHTTPS、Google Trust Services CA、NTPの実装が変更された場合は、CA期限、時刻未同期、再起動後の直接取得を実機で確認してから案内を更新します。
 
-2026-09-27の公開前確認で、Espressif 32 platformを7.1.3へ更新した。上流の変更はコンパイラに適用されるビルドフラグの範囲修正である。Ruffも0.16.9へ更新した。両更新の検証結果は `verification.md` に記録する。
+2026-09-27の公開前確認で、Espressif 32 platformを7.1.3へ更新した。上流の変更はコンパイラに適用されるビルドフラグの範囲修正である。Ruffも0.16.9へ更新した。WindowsローカルBINは更新前の実機検証済みBINと一致した一方、Ubuntuで生成された公開BINは一致しなかったため、公開BINも別途COM7で検証した。詳細は `verification.md` に記録する。
 
 2026-09-14時点で[TFT_eSPIの公開Security Advisories](https://github.com/Bodmer/TFT_eSPI/security/advisories)は0件と確認した。旧Adafruit構成は通知版と異なる描画・入力方式だったため置き換えた。8-bit Spriteは旧16-bit全画面バッファより少ない約75KiBだが、TLS併用時の実機メモリと画面のちらつきは未検証である。
 

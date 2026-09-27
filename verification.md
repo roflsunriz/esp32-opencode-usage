@@ -1,5 +1,12 @@
 # 検証
 
+## v0.4.2公開後の配布物検証（2026-09-27）
+
+- main CI [run 36296397479](https://github.com/roflsunriz/esp32-opencode-usage/actions/runs/36296397479) はコミット `2d2fe0c` のホスト・ファームウェア両ジョブで成功し、[Release run 36296521306](https://github.com/roflsunriz/esp32-opencode-usage/actions/runs/36296521306) も成功した。[v0.4.2](https://github.com/roflsunriz/esp32-opencode-usage/releases/tag/v0.4.2) は公開状態で、本文は `CHANGELOG.md` の0.4.2節と一致した。
+- 4成果物をダウンロードして検査した。ホストZIPとtar.gzの全79ファイル、ファームウェアZIPとtar.gzの全51ファイルは内容一致。`start.cmd`、`dist/cli.js`、USB worker、ソース、更新手順、依存設定、個別BINとfull BINが含まれ、`.private`・保存セッション・バックアップは含まれない。公開 `firmware-full.bin` のアプリ領域は公開 `firmware.bin` と一致し、bootloaderとアプリのESP32 magicを確認した。
+- 公開Ubuntuビルドの `firmware.bin` は998,832バイト・SHA-256 `7231C784ED9AED496DCEF2883FFFC7DF6ED885399307567FCABEBE6ECA73EE8A`。同じソース・依存版のWindowsローカルビルド（998,928バイト・`564CBE3A…`）とはバイト一致しなかった。ビルド環境による差の詳細原因は未特定で、公開BIN自体を別途実機検証した。
+- 公開BINの書き込み前にCOM7の4MB全フラッシュを `.private/backups/before-release-bin-20260927.bin` へ退避（SHA-256 `5380A9441F7A0B633FEB64042AF9ACA5F61456DD8B1DD8C99A2EE0C78DB85767`）、`--after no_reset`／`--before no_reset` で実機とのdigest一致を確認した。公開ZIPから抽出した `firmware.bin` を0x10000のアプリ領域だけへ書き、書き込み後もdigest一致。BOOT解除・RST後、製品 `DeviceConnection` 経路のpingで `firmware=opencode-go-lcd`、`setupSchema=3`、`hasUsage:true`、`renderCount:1`、Wi-Fi設定保持、取得間隔600秒を確認した。PCは使用量フレームを送っていないため、直接取得で描画できた。
+
 ## v0.4.2公開前確認（2026-09-27）
 
 - `bun outdated` とPyPIの公式メタデータ、`pio pkg outdated` を確認した。Ruffを0.16.9、Espressif 32 platformを7.1.3へ更新した。TypeScript 7.0.2はtypescript-eslintの公式対応範囲外のため、サポートされる6.0.3を維持した。
