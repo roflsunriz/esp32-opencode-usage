@@ -37,6 +37,33 @@ void test_normalizes_all_three_console_meters() {
   TEST_ASSERT_NOT_NULL(strstr(payload, "\"resetInSec\":923043"));
 }
 
+void test_unused_five_hour_meter_has_no_reset_countdown() {
+  constexpr char kIdleResponse[] =
+      "{\"access\":{\"endsAt\":\"2026-10-02T22:58:39.000Z\","
+      "\"meters\":{\"fiveHour\":{\"startsAt\":null,\"resetsAt\":null,"
+      "\"limitMicroCents\":\"1200000000\",\"usedMicroCents\":\"0\"},"
+      "\"week\":{\"resetsAt\":\"2026-09-28T00:00:00.000Z\","
+      "\"limitMicroCents\":\"3000000000\",\"usedMicroCents\":\"1\"},"
+      "\"month\":{\"limitMicroCents\":\"6000000000\","
+      "\"usedMicroCents\":\"1\"}}}}";
+  char payload[opencode_client::kUsagePayloadCapacity] = {};
+  TEST_ASSERT_TRUE(opencode_client::normalizeConsoleStatusUsage(
+      kIdleResponse, strlen(kIdleResponse), kUpdatedAt, payload,
+      sizeof(payload)));
+  TEST_ASSERT_NOT_NULL(strstr(payload, "\"rolling\":{\"used\":0.00000000,"));
+  TEST_ASSERT_NOT_NULL(strstr(payload, "\"resetInSec\":null"));
+  TEST_ASSERT_NOT_NULL(strstr(payload, "\"weekly\":"));
+
+  char usedWhileInactive[sizeof(kIdleResponse)] = {};
+  memcpy(usedWhileInactive, kIdleResponse, sizeof(kIdleResponse));
+  char *used = strstr(usedWhileInactive, "\"usedMicroCents\":\"0\"");
+  TEST_ASSERT_NOT_NULL(used);
+  used[strlen("\"usedMicroCents\":\"")] = '1';
+  TEST_ASSERT_FALSE(opencode_client::normalizeConsoleStatusUsage(
+      usedWhileInactive, strlen(usedWhileInactive), kUpdatedAt, payload,
+      sizeof(payload)));
+}
+
 void test_rejects_incomplete_or_malformed_status() {
   char payload[opencode_client::kUsagePayloadCapacity] = {};
   constexpr char kMissingMonth[] =
@@ -84,6 +111,7 @@ void tearDown() {}
 int runTests() {
   UNITY_BEGIN();
   RUN_TEST(test_normalizes_all_three_console_meters);
+  RUN_TEST(test_unused_five_hour_meter_has_no_reset_countdown);
   RUN_TEST(test_rejects_incomplete_or_malformed_status);
   return UNITY_END();
 }

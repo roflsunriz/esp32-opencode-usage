@@ -77,6 +77,62 @@ describe("official usage", () => {
     expect(frame.rolling.resetInSec).toBe(0);
   });
 
+  test("accepts an unused five-hour meter without a reset countdown", () => {
+    const idle = {
+      access: {
+        ...sample.access,
+        meters: {
+          ...sample.access.meters,
+          fiveHour: {
+            startsAt: null,
+            resetsAt: null,
+            limitMicroCents: "1200000000",
+            usedMicroCents: "0",
+          },
+        },
+      },
+    };
+    const frame = normalizeUsage(idle, now);
+    expect(frame.rolling).toEqual({
+      used: 0,
+      limit: 12,
+      percent: 0,
+      resetInSec: null,
+    });
+    expect(frame.weekly.resetInSec).toBeGreaterThan(0);
+    expect(() =>
+      normalizeUsage(
+        {
+          access: {
+            ...idle.access,
+            meters: {
+              ...idle.access.meters,
+              fiveHour: { ...idle.access.meters.fiveHour, usedMicroCents: "1" },
+            },
+          },
+        },
+        now,
+      ),
+    ).toThrow();
+    expect(() =>
+      normalizeUsage(
+        {
+          access: {
+            ...idle.access,
+            meters: {
+              ...idle.access.meters,
+              fiveHour: {
+                ...idle.access.meters.fiveHour,
+                startsAt: "2026-09-22T06:34:36.282Z",
+              },
+            },
+          },
+        },
+        now,
+      ),
+    ).toThrow();
+  });
+
   test.each([
     null,
     {},

@@ -14,7 +14,7 @@ PCとESP32の `OpenCodeClient` は、コンソールの使用量API `GET /consol
 - `week`（週間・表示名weekly）
 - `month`（月間・表示名monthly）
 
-各期間には `limitMicroCents`、`usedMicroCents` が含まれます。金額の単位は1セント=1,000,000 microCents、すなわち1ドル=100,000,000 microCentsです。使用率は `used/limit*100` で計算します。`fiveHour` と `week` のリセット時刻は各メーターの `resetsAt`（ISO8601 UTC）、`month` は `access.endsAt` から求めます。欠損、負値、非有限値、0の上限、不正な時刻は拒否し、0%として表示しません。
+各期間には `limitMicroCents`、`usedMicroCents` が含まれます。金額の単位は1セント=1,000,000 microCents、すなわち1ドル=100,000,000 microCentsです。使用率は `used/limit*100` で計算します。`fiveHour` と `week` のリセット時刻は各メーターの `resetsAt`（ISO8601 UTC）、`month` は `access.endsAt` から求めます。未使用の5時間枠は `startsAt:null`、`resetsAt:null`、`usedMicroCents:"0"` として返るため、この組合せに限り0%を表示し、リセット残り時間を表示しません。欠損、負値、非有限値、0の上限、不正な時刻は拒否します。
 
 応答は `application/json` です。旧来の `/_server` へのPOSTやSerovalストリームは2026-09-22に公式コンソールから廃止されたため使いません。
 
@@ -76,6 +76,8 @@ USB表示用の使用量フレームは次の形です。
 ```
 
 ESP32は3期間を一括検証してから表示へ反映します。一部の期間だけ更新しません。使用量ACKには `accepted:"usage"`、送信元、更新時刻、描画回数、期間数、各数値を返します。
+
+5時間枠が未使用の場合は `rolling` の `resetInSec` を `null` とし、LCDとPCでは残り時間を `—` で表示します。使用量0と上限額は実応答の値を表示します。
 
 ESP32が公式HTTPSサービスから直接取得して表示した場合、ACKの更新時刻をUSB worker経由でPCへ返します。操作画面はこの値を「ESP32の直接更新を確認」と表示し、PCを終了できる判断材料にします。
 

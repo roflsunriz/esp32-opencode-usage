@@ -22,6 +22,16 @@ powershell -ExecutionPolicy Bypass -File scripts/backup-firmware.ps1 -Port COM3 
 
 既存の元ファームウェアは上書きせず、機器ごとに別の出力先を指定します。
 
+COM7のCH340基板では自動で書込モードに入れない場合があります。その場合はBOOTを押し続け、まず `flash_id` で容量を確認してください。4MBと確認できた今回の基板では、リポジトリのesptool v4.11.0で次を実行して退避・照合しました。別の容量なら `ALL` の読み取り結果に従い、固定の4MBとみなさないでください。
+
+```powershell
+python .platformio/packages/tool-esptoolpy/esptool.py --chip esp32 --port COM7 --baud 115200 --after no_reset flash_id
+python .platformio/packages/tool-esptoolpy/esptool.py --chip esp32 --port COM7 --baud 460800 --before no_reset --after no_reset read_flash 0 ALL .private/backups/before-update-com7.bin
+python .platformio/packages/tool-esptoolpy/esptool.py --chip esp32 --port COM7 --baud 115200 --before no_reset --after no_reset verify_flash 0 .private/backups/before-update-com7.bin
+```
+
+`--after no_reset` と `--before no_reset` を続けて使い、読み出しと照合の間は再起動させません。Wi-Fi設定済みの基板は再起動時にNVSが変わり、同じ退避でもdigestが一致しなくなるためです。作業後はBOOTを離してRSTを押し、通常起動へ戻してください。
+
 ## ホストの更新
 
 ```powershell
@@ -35,7 +45,7 @@ bun run test
 bun run audit
 ```
 
-`start.cmd` を起動し、公式ログイン、USBポートの列挙、接続、初期設定の保存完了を確認します。初期設定の保存では、暗号化済みPCセッションから認証Cookie、ワークスペース、動的な取得先IDをESP32へ送り、ESP32の保存ACKを待ちます。
+`start.cmd` を起動し、公式ログイン、USBポートの列挙、接続、初期設定の保存完了を確認します。初期設定の保存では、暗号化済みPCセッションから認証CookieとワークスペースをESP32へ送り、ESP32の保存ACKを待ちます。
 
 ## ファームウェアの更新
 
@@ -62,7 +72,7 @@ powershell -ExecutionPolicy Bypass -File scripts/restore-firmware.ps1 -Port COM3
 
 ## 公式サイトの形式変更
 
-`docs/protocol.md` と `host/api.ts` を確認し、認証済み公式ページが参照する動的な取得先、引数、レスポンスを実測します。認証済みレスポンスを公開テストへ直接コピーせず、必要な数値構造だけを匿名化したフィクスチャにします。未知の形式を成功扱いにするフォールバックは追加しません。
+`docs/protocol.md` と `host/api.ts` を確認し、認証済み公式ページが参照する取得先、引数、レスポンスを実測します。認証済みレスポンスを公開テストへ直接コピーせず、必要な数値構造だけを匿名化したフィクスチャにします。未知の形式を成功扱いにするフォールバックは追加しません。
 
 ## リリース
 

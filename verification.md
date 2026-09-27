@@ -1,5 +1,14 @@
 # 検証
 
+## 未使用5時間枠での response invalid 修正（2026-09-27）
+
+- COM7の製品 `DeviceConnection` 経路で `OpenCode response invalid` を再現した。USB診断はHTTP 200、`application/json`、宣言長745バイト、受信745バイトで、通信途中切断ではなかった。
+- 保存済み実機バックアップの認証を画面やログへ出さず、公式 `GET /console/api/go/status` を読み取った。ログイン済みChromeのCDP 9222側でも同じ745バイト・HTTP 200・未使用状態を照合した。`fiveHour` が `startsAt:null`、`resetsAt:null`、`usedMicroCents:"0"` で、従来のPC・ESP32パーサーはいずれも `resetsAt` を必須とし、これを不正扱いしていた。
+- この明示的な未使用状態だけは5時間枠0%とリセット残り時間なしとして受理し、欠損や使用済み値を伴うnull日時は引き続き拒否する回帰テストを追加した。ホストとLCDの表示では時刻のない残り時間を `—` とする。
+- 修正版の実機書き込み前にCOM7の4MB全フラッシュを `.private/backups/before-idle-meter-20260927.bin` へ退避（SHA-256 `928F22F7D55902FD24DDE1730705374F15B45ED87CA74C19FB3A0D989F99A1BA`）、`--after no_reset`／`--before no_reset` で実機とdigest一致を確認した。アプリ領域のみ0x10000へ書き、書き込み後のアプリ領域もdigest一致を確認した。BOOT保持を解除してRST後、製品経路のpingで `hasUsage:true`、`renderCount:1`、取得間隔600秒を確認した。
+- ホストはlint・フォーマット確認・型チェック・ビルド・38テスト、ファームウェアは47 nativeテストとESP32ビルドが成功した。修正版PCパーサーには同日の実応答を通し、未使用5時間枠0%と残り時間なし、週間・月間の有効値を確認した。
+- PC操作画面もChrome CDP 9222の独立タブで確認した。未使用5時間枠のカードは `0%`、`$0.00 / $12.00`、残り時間 `—` を表示し、週間・月間は各残り時間を表示した。
+
 ## response invalidの間欠表示の調査と修正（2026-09-26）
 
 所有者の報告はLCD状態行の `OpenCode response invalid` が時々出ること。文字列の出どころは `firmware/src/network_client.cpp` の取得失敗表示だけであり、PC側に同文言はない。

@@ -311,11 +311,12 @@ struct MeterData {
   uint64_t usedMicro = 0;
   uint64_t limitMicro = 0;
   uint64_t resetEpochSec = 0;
+  bool hasReset = true;
 };
 
 bool parseMeter(const char *input, size_t begin, size_t end,
                 size_t fallbackBegin, size_t fallbackEnd, bool hasFallback,
-                MeterData &meter) {
+                bool allowInactive, MeterData &meter) {
   size_t valueBegin = 0;
   size_t valueEnd = 0;
   if (!findRawValue(input, begin, end, "usedMicroCents", valueBegin,
@@ -330,12 +331,25 @@ bool parseMeter(const char *input, size_t begin, size_t end,
     return false;
   }
   if (findRawValue(input, begin, end, "resetsAt", valueBegin, valueEnd)) {
-    size_t textBegin = 0;
-    size_t textEnd = 0;
-    if (valueBegin >= valueEnd || input[valueBegin] != '"' ||
-        !readJsonString(input, valueBegin, valueEnd, textBegin, textEnd) ||
-        !parseIso8601Utc(input, textBegin, textEnd, meter.resetEpochSec)) {
-      return false;
+    if (valueEnd - valueBegin == 4 &&
+        memcmp(input + valueBegin, "null", 4) == 0) {
+      size_t startBegin = 0;
+      size_t startEnd = 0;
+      if (!allowInactive || meter.usedMicro != 0 ||
+          !findRawValue(input, begin, end, "startsAt", startBegin, startEnd) ||
+          startEnd - startBegin != 4 ||
+          memcmp(input + startBegin, "null", 4) != 0) {
+        return false;
+      }
+      meter.hasReset = false;
+    } else {
+      size_t textBegin = 0;
+      size_t textEnd = 0;
+      if (valueBegin >= valueEnd || input[valueBegin] != '"' ||
+          !readJsonString(input, valueBegin, valueEnd, textBegin, textEnd) ||
+          !parseIso8601Utc(input, textBegin, textEnd, meter.resetEpochSec)) {
+        return false;
+      }
     }
   } else {
     // The monthly meter carries no resetsAt; the subscription endsAt applies.
@@ -395,14 +409,14 @@ bool normalizeConsoleStatusUsage(const char *response, size_t length,
     }
     const bool monthly = index == 2;
     if (!parseMeter(response, contentBegin, contentEnd, endsAtBegin, endsAtEnd,
-                    monthly, meters[index])) {
+                    monthly, index == 0, meters[index])) {
       return false;
     }
   }
   double used[3] = {};
   double limit[3] = {};
   double percent[3] = {};
-  uint64_t resetInSec[3] = {};
+  char resetInSec[3][24] = {};
   for (int index = 0; index < 3; ++index) {
     used[index] =
         static_cast<double>(meters[index].usedMicro) /
@@ -417,22 +431,26 @@ bool normalizeConsoleStatusUsage(const char *response, size_t length,
         percent[index] > 100000.0) {
       return false;
     }
-    resetInSec[index] = meters[index].resetEpochSec >= updatedAtSec
-                            ? meters[index].resetEpochSec - updatedAtSec
-                            : 0;
+    if (!meters[index].hasReset) {
+      snprintf(resetInSec[index], sizeof(resetInSec[index]), "null");
+    } else {
+      const uint64_t remaining = meters[index].resetEpochSec >= updatedAtSec
+                                     ? meters[index].resetEpochSec - updatedAtSec
+                                     : 0;
+      snprintf(resetInSec[index], sizeof(resetInSec[index]), "%llu",
+               static_cast<unsigned long long>(remaining));
+    }
   }
   const int written = snprintf(
       output, outputCapacity,
       "{\"version\":1,\"type\":\"usage\",\"updatedAt\":%llu,"
       "\"rolling\":{\"used\":%.8f,\"limit\":%.8f,\"percent\":%.6g,"
-      "\"resetInSec\":%llu},\"weekly\":{\"used\":%.8f,\"limit\":%.8f,"
-      "\"percent\":%.6g,\"resetInSec\":%llu},\"monthly\":{\"used\":%.8f,"
-      "\"limit\":%.8f,\"percent\":%.6g,\"resetInSec\":%llu}}",
+      "\"resetInSec\":%s},\"weekly\":{\"used\":%.8f,\"limit\":%.8f,"
+      "\"percent\":%.6g,\"resetInSec\":%s},\"monthly\":{\"used\":%.8f,"
+      "\"limit\":%.8f,\"percent\":%.6g,\"resetInSec\":%s}}",
       static_cast<unsigned long long>(updatedAtSec), used[0], limit[0],
-      percent[0], static_cast<unsigned long long>(resetInSec[0]), used[1],
-      limit[1], percent[1], static_cast<unsigned long long>(resetInSec[1]),
-      used[2], limit[2], percent[2],
-      static_cast<unsigned long long>(resetInSec[2]));
+      percent[0], resetInSec[0], used[1], limit[1], percent[1], resetInSec[1],
+      used[2], limit[2], percent[2], resetInSec[2]);
   if (written < 0 || static_cast<size_t>(written) >= outputCapacity) {
     output[0] = '\0';
     return false;

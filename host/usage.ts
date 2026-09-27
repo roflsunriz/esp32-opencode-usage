@@ -5,7 +5,7 @@ export interface UsageWindow {
   used: number;
   limit: number;
   percent: number;
-  resetInSec: number;
+  resetInSec: number | null;
 }
 
 export interface UsageFrame {
@@ -81,7 +81,16 @@ export function normalizeUsage(value: unknown, now = Date.now()): UsageFrame {
     }
     // 月間メーターに resetsAt はなく、契約の endsAt がリセット時刻になる。
     const resetSource = period === "monthly" ? access.endsAt : item.resetsAt;
-    const resetInSec = resetInSecFrom(resetSource, "resetsAt", now);
+    // An unused five-hour meter explicitly has null start/reset times and
+    // zero usage. There is no active reset countdown in that state.
+    const inactiveRolling =
+      period === "rolling" &&
+      item.startsAt === null &&
+      item.resetsAt === null &&
+      usedMicro === 0;
+    const resetInSec = inactiveRolling
+      ? null
+      : resetInSecFrom(resetSource, "resetsAt", now);
     windows[period] = { used, limit, percent, resetInSec };
   }
   return {
