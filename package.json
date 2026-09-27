@@ -1,6 +1,6 @@
 {
   "name": "esp32-opencode-usage",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/bun": "latest",
