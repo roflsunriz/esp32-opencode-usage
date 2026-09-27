@@ -1,6 +1,6 @@
 # 依存関係の採用記録
 
-確認日: 2026-09-14
+確認日: 2026-09-27
 
 正確な解決バージョンは `package.json`、`bun.lock`、`requirements*.txt`、`platformio.ini` を正本とします。ここでは採用理由、ライセンス、保守状況、代替候補を記録します。
 
@@ -9,9 +9,9 @@
 | 依存関係                                                                                                                                                                    | 宣言                                                                 | 採用理由・保守状況                                                                                                                                                                                            | ライセンス                  |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
 | [Bun](https://bun.sh/)                                                                                                                                                      | `engines.bun >=1.4`                                                  | WindowsでTypeScriptの起動、ビルド、テスト、依存管理を行う。製品USBはBunのnative addonを使わずPython workerへ委譲する。                                                                                        | MIT                         |
-| [TypeScript](https://github.com/microsoft/TypeScript)                                                                                                                       | `^5.9.0`                                                             | ホストのAPI応答、認証状態、設定フレームを静的型で扱う。                                                                                                                                                       | Apache-2.0                  |
-| [ESLint](https://github.com/eslint/eslint)、[`@eslint/js`](https://github.com/eslint/eslint)、[`typescript-eslint`](https://github.com/typescript-eslint/typescript-eslint) | ESLint `^10.10.0`、`@eslint/js ^10.0.1`、`typescript-eslint ^8.46.0` | ESLint 9.xのEOLを避け、現行10.xで型付き解析を行う。                                                                                                                                                           | MIT                         |
-| [Prettier](https://github.com/prettier/prettier)                                                                                                                            | `^3.6.0`                                                             | TypeScript、設定、ドキュメントの整形を統一する。                                                                                                                                                              | MIT                         |
+| [TypeScript](https://github.com/microsoft/TypeScript)                                                                                                                       | `package.json`                                                     | ホストのAPI応答、認証状態、設定フレームを静的型で扱う。                                                                                                                                                       | Apache-2.0                  |
+| [ESLint](https://github.com/eslint/eslint)、[`@eslint/js`](https://github.com/eslint/eslint)、[`typescript-eslint`](https://github.com/typescript-eslint/typescript-eslint) | `package.json`                                                     | ESLint 9.xのEOLを避け、現行10.xで型付き解析を行う。                                                                                                                                                           | MIT                         |
+| [Prettier](https://github.com/prettier/prettier)                                                                                                                            | `package.json`                                                     | TypeScript、設定、ドキュメントの整形を統一する。                                                                                                                                                              | MIT                         |
 | [pySerial](https://github.com/pyserial/pyserial)                                                                                                                            | `requirements.txt` の `3.5`                                          | `host/serial-worker.py` の実USB通信を担当する。CH340実機でread/writeと切断を確認でき、Bun/Nodeのserialport直接経路より安定したため採用した。Windows、macOS、Linuxに対応する成熟した純Pythonライブラリである。 | BSD-3-Clause                |
 | [mypy](https://github.com/python/mypy)                                                                                                                                      | `requirements-dev.txt` の `2.3.1`                                    | workerを `--strict` で検査する開発用ツール。                                                                                                                                                                  | MIT                         |
 | [types-pyserial](https://github.com/python/typeshed)                                                                                                                        | `requirements-dev.txt` の `3.5.0.20260712`                           | pySerialの型検査を補う開発用stub。                                                                                                                                                                            | MIT相当のtypeshedライセンス |
@@ -22,12 +22,14 @@ pySerialの公式GitHubで公開されている最新タグ表示はv3.5で、Py
 
 Node.js 24は開発用fake fixtureテストだけで使います。製品のホスト起動とUSB通信の実行時依存ではありません。
 
+2026-09-27の更新確認ではTypeScript 7.0.2が公開されていたが、[typescript-eslintの公式対応範囲](https://typescript-eslint.io/users/dependency-versions/)はTypeScript 6.1未満であるため、型検査とlintが同じサポート範囲に入る6.0.3を維持した。対応範囲が広がった後に7系を再評価する。
+
 ## ファームウェアと書き込み
 
 | 依存関係                                                                    | 宣言                                    | 採用理由・保守状況                                                            | ライセンス           |
 | --------------------------------------------------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------- | -------------------- |
 | [PlatformIO Core](https://github.com/platformio/platformio-core)            | `requirements-dev.txt` の `6.2.0`       | ESP32ビルド、nativeテスト、依存ライブラリ解決を `platformio.ini` で再現する。 | Apache-2.0           |
-| [Espressif 32 platform](https://github.com/platformio/platform-espressif32) | `platformio.ini` の `espressif32@7.1.2` | ESP32ボード定義、Arduino framework、ツールチェーンを固定する。                | Apache-2.0           |
+| [Espressif 32 platform](https://github.com/platformio/platform-espressif32) | `platformio.ini` の `espressif32@7.1.3` | ESP32ボード定義、Arduino framework、ツールチェーンを固定する。                | Apache-2.0           |
 | [arduino-esp32](https://github.com/espressif/arduino-esp32)                 | PlatformIO経由                          | Wi-Fi、NVS、SPI、TLS、時刻同期などESP32実装の基盤。                           | LGPL-2.1             |
 | [TFT_eSPI](https://github.com/Bodmer/TFT_eSPI)                              | `2.5.43`                                | 通知版と同じILI9341描画に統一し、8-bit Spriteから変化した16行帯だけ転送する。旧Adafruit GFX/ILI9341を置き換えた。 | MIT/BSD/FreeBSD（同梱license.txt） |
 | [XPT2046_Touchscreen由来のドライバー](https://github.com/PaulStoffregen/XPT2046_Touchscreen) | `lib/sensitive-xpt2046` | 通知版と同じ押圧値取得とPENIRQ復帰を使い、軽いタッチペンの2点調整に対応する。 | MIT（原著作権表示を保持） |
@@ -36,6 +38,8 @@ Node.js 24は開発用fake fixtureテストだけで使います。製品のホ�
 | [Pillow](https://github.com/python-pillow/Pillow)                           | `requirements-dev.txt` の `12.3.0`      | USB診断スクリーンショットのRGBデータを検証する開発用ツール。                  | HPND / PILライセンス |
 
 PlatformIOの解決結果は `platformio.ini` の固定値を基準に更新します。ESP32のHTTPS、Google Trust Services CA、NTPの実装が変更された場合は、CA期限、時刻未同期、再起動後の直接取得を実機で確認してから案内を更新します。
+
+2026-09-27の公開前確認で、Espressif 32 platformを7.1.3へ更新した。上流の変更はコンパイラに適用されるビルドフラグの範囲修正である。Ruffも0.16.9へ更新した。両更新の検証結果は `verification.md` に記録する。
 
 2026-09-14時点で[TFT_eSPIの公開Security Advisories](https://github.com/Bodmer/TFT_eSPI/security/advisories)は0件と確認した。旧Adafruit構成は通知版と異なる描画・入力方式だったため置き換えた。8-bit Spriteは旧16-bit全画面バッファより少ない約75KiBだが、TLS併用時の実機メモリと画面のちらつきは未検証である。
 

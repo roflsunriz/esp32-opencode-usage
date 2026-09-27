@@ -1,5 +1,11 @@
 # 検証
 
+## v0.4.2公開前確認（2026-09-27）
+
+- `bun outdated` とPyPIの公式メタデータ、`pio pkg outdated` を確認した。Ruffを0.16.9、Espressif 32 platformを7.1.3へ更新した。TypeScript 7.0.2はtypescript-eslintの公式対応範囲外のため、サポートされる6.0.3を維持した。
+- 7.1.3で生成した `firmware.bin` は7.1.2でCOM7へ書き込んだ実機検証済みイメージと同じ998,928バイト、SHA-256 `564CBE3A18F0DBDE8C861DC6E5C9D769831757E6E46BFE475B9876484A78551D` だった。
+- ホストのlint・整形・型検査・ビルド・38テスト・依存監査（98パッケージ、警告なし）、Pythonのmypy・Ruff・USB worker列挙、ESP32ビルド・native47テストが成功した。
+
 ## 未使用5時間枠での response invalid 修正（2026-09-27）
 
 - COM7の製品 `DeviceConnection` 経路で `OpenCode response invalid` を再現した。USB診断はHTTP 200、`application/json`、宣言長745バイト、受信745バイトで、通信途中切断ではなかった。
