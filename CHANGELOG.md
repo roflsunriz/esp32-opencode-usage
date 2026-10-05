@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- DependabotのBun更新が未対応のlock形式2で停止する問題を解消するため、公式Bun 1.3.14で形式1のlockを再生成し、自動修復と開発用lock生成を同じコマンドへ統一した。製品実行・CI・ReleaseはBun 1.4.2を維持する。既存の依存範囲内で解決されるESLint・typescript-eslintと関連依存を更新した。
+- Dependabot設定が参照するラベルの未初期化・編集・削除による分類漏れを防ぐため、必要ラベルだけを冪等に作成する専用workflowと回帰テストを追加した。既存ラベル、CI、承認条件は維持する。
+
+### Security
+
+- 既存のDependabot PRで監査が失敗していたbrace-expansionの脆弱性（high 2件・moderate 1件）を解消するため、lock再解決で5.0.9から5.0.12へ更新した。監査ゲートは維持する。
+
 ## [0.4.2] - 2026-09-27
 
 ### Fixed
