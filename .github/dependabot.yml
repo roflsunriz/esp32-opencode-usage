@@ -1,3 +1,5 @@
+# Required labels are maintained by workflows/dependabot-labels.yml.
+# Generate bun.lock with `bun run deps:lock`; Dependabot currently supports format 1.
 version: 2
 updates:
   - package-ecosystem: pip

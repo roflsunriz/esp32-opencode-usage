@@ -17,6 +17,8 @@ jobs:
         uses: actions/checkout@v7
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
@@ -57,7 +59,7 @@ jobs:
           cp -R host release/host/
           cp -R scripts release/host/
           cp start.cmd release/host/
-          cp package.json bun.lock requirements.txt requirements-dev.txt tsconfig.json eslint.config.js platformio.ini release/host/
+          cp .bun-version package.json bun.lock requirements.txt requirements-dev.txt tsconfig.json eslint.config.js platformio.ini release/host/
           cp -R firmware release/host/
           cp -R lib release/host/
           cp README.md how-to-update.md verification.md release/host/
