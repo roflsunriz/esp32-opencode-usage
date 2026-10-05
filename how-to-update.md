@@ -99,3 +99,27 @@ schema 2から3への更新時はWi-Fi・認証を保持し、消灯時間を初
 設定を変えたときは `actionlint .github/workflows/dependabot-automation.yml` と実際の PR の Actions 結果を確認します。問題があれば呼び出し先の共通 workflow SHA を直前の検証済み値へ戻すコミットを push します。取り込まれた依存更新に問題があれば通常の revert コミットで復旧します。
 
 CI 完了より Dependabot の分類が遅れる場合は、`callback_workflow_file` が指す呼び出し側 workflow を `workflow_dispatch` し、同じ PR 番号・head SHA・全チェックを再確認する。呼び出し側のファイル名を変える際はこの入力も一緒に更新する。
+
+
+## Dependabotラベルの維持
+
+`.github/workflows/dependabot-labels.yml` は既定ブランチのDependabot設定を読み、`updates` と `multi-ecosystem-groups` が明示指定するラベルの不足分だけ作成します。設定変更、ラベルの編集・削除、毎日04:17 UTC、手動実行で検査します。既存ラベルの色・説明やPRへの付与状態は変更しません。書込権限は専用ジョブの `issues: write` に限定し、PRの検証ジョブは読み取り専用です。
+
+ラベルが不足する場合、Actionsの「Maintain Dependabot labels」を既定ブランチで手動実行し、`All configured Dependabot labels exist` を確認します。権限エラーやarchivedラベルとの競合は失敗として通知されます。Dependabot設定のラベル名を別名へ付け替えたり、CI・承認条件を無効化して回避しないでください。
+
+変更時は次を実行し、Actions上でも検証してください。
+
+```powershell
+python -m pip install PyYAML==6.0.3
+python .github/tests/test-dependabot-labels.py
+actionlint .github/workflows/dependabot-labels.yml
+```
+
+Dependabot更新そのものの成功は、更新ジョブのログと結果で確認します。指定ラベルが無い場合はGitHubの仕様では無視されるため、実際のジョブ失敗をラベル不足だけと決めつけないでください。更新チェックの手動実行はGitHubのDependabot更新画面で提供される場合に使用し、Actions APIが再試行不可と返す実行は成功扱いしません。
+
+
+### Bun lock形式の互換性
+
+2026-10-05のDependabot Bun更新は `lockfileVersion: 2` を拒否し、形式1までの対応と報告した。製品実行はBun 1.4系を維持し、lock生成だけ `bun run deps:lock` で公式Bun 1.3.14を使用する。`npx` が必要なためNode.jsを用意する。CI・Releaseは `.bun-version`（1.4.2）を参照し、配布ホストへ同梱する。新しいBunでlockを生成してからversion数値だけ手書きで戻してはいけない。
+
+Bun更新時は実際のDependabotログ/パーサーで対応形式を確認し、`deps:lock` の生成版、lockfile、`.github/tests/test-dependabot-labels.py` の互換検査を一緒に変更する。生成版の更新を `.bun-version` の実行版と混同しない。依存の追加・更新後は `bun run deps:lock`、`bun install --frozen-lockfile`、lint、format:check、type-check、build、test、auditを通す。既存の自動修復も同じ生成コマンドを使用する。

@@ -26,6 +26,6 @@ jobs:
     with:
       ci_workflows: '["CI"]'
       callback_workflow_file: dependabot-automation.yml
-      autofix_command: 'bun install --lockfile-only --ignore-scripts'
+      autofix_command: 'npx --yes bun@1.3.14 install --lockfile-only --ignore-scripts'
       autofix_paths: '["bun.lock"]'
       autofix_workflow_files: '["ci.yml"]'

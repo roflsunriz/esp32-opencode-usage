@@ -19,7 +19,7 @@ ESP32-2432S028R（ILI9341・320×240）に、OpenCode Goの5時間・週間・�
 
 - ESP32-2432S028R（ILI9341）とデータ通信できるUSBケーブル
 - Windows PC
-- Python 3.12以降、Bun 1.4以降、Firefox
+- Python 3.12以降、`.bun-version` 指定のBun（現在1.4.2）、Firefox
 - OpenCode Goを契約しているアカウント
 - 初回のファームウェア書き込みに使うPlatformIOとesptool
 
@@ -141,4 +141,6 @@ Python側の実行時USBはpySerialです。Node.js 24は開発用のfake fixtur
 
 ## 依存更新の自動処理
 
-Dependabot は対象の依存関係を毎週確認します。patch／minor 更新は PR のチェック（CI）が成功した後に自動で squash merge されます。CI の失敗ジョブは 1 回だけ再実行します。再失敗した PR は残して手動で修正します。major 更新は手動で確認します。
+Dependabot は pip／Bun の依存関係を毎週、GitHub Actionsを毎月確認します。依存更新は PR のチェック（CI）が成功した後に自動で squash merge されます。CI の失敗ジョブは 1 回だけ再実行し、設定されたlockfileの修復も試みます。再失敗した PR は残して手動で修正します。
+
+Dependabot設定が参照するラベルは、設定変更時・ラベルの編集/削除時・毎日の検査で不足分だけ自動作成します。既存ラベルの色・説明は変更しません。開発・CI・Releaseは `.bun-version` の版を使用し、Dependabotが読める `bun.lock` 形式1の生成には `bun run deps:lock` を使います。手順は [依存更新](how-to-update.md#dependabot-pr-の更新) を参照してください。
