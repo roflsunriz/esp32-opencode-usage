@@ -261,3 +261,19 @@ python scripts/capture-lcd.py --port COM3 --output .private/lcd.png
 実際の Dependabot PR がまだない場合、動作経路は未検証として扱う。実 PR 発生後に自動化ジョブ、CI の再試行、マージ結果を確認する。
 
 大量の Dependabot PR により CI 完了より分類が遅れる場合でも、分類後の `workflow_dispatch` が現在の PR 番号と head SHA を照合して再評価する。別の作成者、古い SHA、未完了の CI はマージしない。
+
+
+## Dependabotラベル維持（2026-10-05）
+
+- roflsunriz所有の公開/非公開52リポジトリをページネーションして全走査。49件にDependabot設定、6件に明示ラベル指定があり、4件・5ラベルの不足を確認。作成後の全再走査は不足0・API/解析失敗0・archive0。
+- このリポジトリの指定ラベル不足はGitHub APIへの作成と再取得で解消。既存ラベルを削除・変更せず、既存PRは操作しなかった。
+- workflowのラベル維持をHTTPモックで回帰検証。欠落の作成、二度目の無変更、既存の色/説明保持、大文字小文字、100件超のページ取得、labels未指定、multi-ecosystem group、競合422、権限403、入力不正、未回復の422、archive競合を含む。Actionlintでも検査した。
+- 公開時はPRとmainで専用workflow・通常CIを確認し、実在ラベルとDependabot更新結果を照合する。実行IDとURLは修正PRの検証欄を参照する。
+
+### Bun更新停止の修復
+
+- 実失敗run [37279496981](https://github.com/roflsunriz/esp32-opencode-usage/actions/runs/37279496981) は `Unsupported bun.lock 'lockfileVersion' 2`（最大1）。pipの [37279485220](https://github.com/roflsunriz/esp32-opencode-usage/actions/runs/37279485220) とGitHub Actionsの [36832374548](https://github.com/roflsunriz/esp32-opencode-usage/actions/runs/36832374548) は修正前から成功しており、ラベル不足を全ジョブの停止原因とは扱わない。
+- 古いdynamic実行を公式 `gh run rerun --failed` で再試行すると `This workflow run cannot be retried` を返した。run_attemptは1のまま。古い実行を迂回せず、設定修正による新しい実行で確認する。
+- lock生成は公式npm `bun@1.3.14`、実行・CI・Releaseは公式Bun1.4.2。1.3.14で製品テストを実行する案はWindowsで終了コード9を再現したため採用しなかった。
+- 公式Bunで形式1・configVersion1のlockを再生成。依存名の集合と既存の直接依存範囲を保持し、ESLint10.12.0、typescript-eslint8.71.0、brace-expansion5.0.12など範囲内の更新を確認した。元のbrace-expansion5.0.9は既存PRの監査でhigh2件・moderate1件を報告していた。
+- Bun1.4.2でfrozen install、lint、format:check、type-check、build、製品38テスト（失敗0）、audit（98パッケージ・脆弱性0）を確認。ラベル/lock回帰11件と変更した4workflowのActionlintが成功。

@@ -56,3 +56,9 @@ Get-Content -Raw -LiteralPath .\COMMON-AGENTS.md
 - LCDの `OpenCode response invalid` は取得失敗表示で、PC側に同文言はない（2026-09-26に特定）。2026-09-27のCOM7再現ではidentity要求のJSON応答が745バイト・宣言長と受信長一致・HTTP 200で、未使用5時間枠のnull日時を旧パーサーが拒否していた。以前の有効期間中は796バイトだったため、応答サイズを固定仕様とみなさない。不正Cookieは401、不正ワークスペースは404になる。超過は `OpenCode response too large` に分離し、応答不正・超過時は内容を含まない診断（`component":"opencode_response`、HTTP状態・宣言長・受信バイト・内容種別）をUSBへ送る。宣言長より短い本体は途中切断として `OpenCode HTTPS failed` で報告する。詳細は `firmware/src/opencode_status.cpp`、`firmware/test/test_response_status`、`docs/protocol.md`。
 - USB診断は製品の `DeviceConnection` 経路（`host/device.ts`）を使う。自作PowerShell経路ではworkerが `error` を返し続け、製品経路では1秒でping互換を確認した（2026-09-26にCOM7で確認）。原因は自作側とみなし、断定しない。
 - v0.4.2公開時（2026-09-27）、WindowsローカルとUbuntu Releaseワークフローの `firmware.bin` は同じソース・依存版でもバイト一致しなかった（998,928対998,832バイト。差の詳細原因は未確定）。ローカルBINの実機検証だけで公開BINも検証済みとみなさず、公開ZIPから取り出したBINをCOM7へアプリ領域のみ書き込み、全フラッシュ事前退避・digest照合、書き込み後のdigest照合、再起動後の直接取得と設定保持を確認した。詳細は `verification.md` のv0.4.2公開後検証。
+
+
+## Dependabotラベルの運用
+
+- 明示指定のラベルはDependabotが自動初期化するとは限らない。既定ブランチの設定を正本とする専用workflowで不足分だけ維持する。検証と復旧は `how-to-update.md` のDependabotラベル節、回帰は `.github/tests/test-dependabot-labels.py`。既存の自動マージ・承認は別のworkflowであり、ラベルの変更で回避しない。
+- 2026-10-05、Bun更新run `37279496981` はラベル不足でなく `Unsupported bun.lock 'lockfileVersion' 2`（最大1）で停止。実行版は `.bun-version` の1.4系、生成版は `bun run deps:lock` の公式1.3.14に分ける。1.3.14で製品テストを実行するとWindowsのMarionette fixture開始時に終了コード9となったため、実行版を下げない。lockの形式番号だけ変更しない。既存のdynamic更新は `gh run rerun` が再試行不可を返した（run_attemptは1）。詳細は `verification.md`。
