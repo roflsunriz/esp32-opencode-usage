@@ -277,3 +277,12 @@ python scripts/capture-lcd.py --port COM3 --output .private/lcd.png
 - lock生成は公式npm `bun@1.3.14`、実行・CI・Releaseは公式Bun1.4.2。1.3.14で製品テストを実行する案はWindowsで終了コード9を再現したため採用しなかった。
 - 公式Bunで形式1・configVersion1のlockを再生成。依存名の集合と既存の直接依存範囲を保持し、ESLint10.12.0、typescript-eslint8.71.0、brace-expansion5.0.12など範囲内の更新を確認した。元のbrace-expansion5.0.9は既存PRの監査でhigh2件・moderate1件を報告していた。
 - Bun1.4.2でfrozen install、lint、format:check、type-check、build、製品38テスト（失敗0）、audit（98パッケージ・脆弱性0）を確認。ラベル/lock回帰11件と変更した4workflowのActionlintが成功。
+
+## 2026-10-05: GitHub受付・READMEの整備（公開前）
+
+- 比較元: `ead1a44f34e105dbc61548e9e3a3c180951383d7`（`main`）。
+- 受付フォーム 7 件のYAML構造、重複キー・ID、入力型、選択肢、予約ファイル名を一括検査し、エラー0件。
+- 既存の固有質問・入力例・必須条件を原文と照合。READMEのリンク・画像・コマンド・条件を確認し、裏付けがある誤記だけを訂正した。
+- 既存のCI、Dependabot、labeler、ライセンスのファイル内容は比較元から変更していない。
+- 製品のビルド・インストール・実機操作、GitHub上のフォーム表示、公開後CIは今回の静的検証に含めない。公開後に実際の受付表示と必要ラベルの適用を確認する。
+- 公開前に確認する不足ラベル: `config`, `firmware`, `security`。既存ラベルの削除・上書きはしない。

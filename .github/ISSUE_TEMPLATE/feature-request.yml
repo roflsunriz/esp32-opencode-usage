@@ -1,32 +1,39 @@
+name: 機能提案
+description: 新しい機能や改善を、利用者の課題とともに提案します。
 title: '[Feature] '
+labels:
+  - enhancement
 body:
   - type: markdown
     attributes:
       value: |-
         esp32-opencode-usageに関する内容を、目的と確認できた事実に分けて記載してください。
         Cookie、認証トークン、パスワード、個人情報を本文や添付に含めないでください。認証コード、Wi-Fi認証情報、NVS・全フラッシュのダンプ、個人設定入りファームウェアも添付しないでください。
-        アイデア / 機能や表示の改善案を提案する
+        投稿前に[README](https://github.com/roflsunriz/esp32-opencode-usage/blob/main/README.md)と[既存Issue](https://github.com/roflsunriz/esp32-opencode-usage/issues)を確認してください。
+        脆弱性の報告は[SECURITY.md](https://github.com/roflsunriz/esp32-opencode-usage/blob/main/SECURITY.md)の案内に従ってください。
   - type: textarea
     id: problem
     attributes:
       label: 解決したい問題
-      description: 現在の利用上の困りごとを説明してください。
+      description: 現在困っていることと、改善後に実現したい状態を記載してください。
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
       label: 提案する変更
-      description: どのような動作や表示を期待するかを書いてください。
+      description: 期待する動作、画面や操作の案を記載してください。
     validations:
       required: true
   - type: textarea
-    id: constraints
+    id: alternatives
     attributes:
       label: 代替案と互換性
-      description: 対応OS、実機、通信、互換性などの条件があれば書いてください。
+      description: 検討した別の方法、既存設定や利用方法への影響を記載してください。
+    validations:
+      required: false
   - type: textarea
-    id: additional-common
+    id: additional
     attributes:
       label: 補足
       description: 参考資料、画面案、受け入れ条件などを記載してください。

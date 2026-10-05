@@ -1,0 +1,48 @@
+name: 設定・接続の相談
+description: Wi-Fi、USB、LAN、ワークスペースなどの設定を相談する
+title: '[Config] '
+labels:
+  - config
+body:
+  - type: markdown
+    attributes:
+      value: |-
+        esp32-opencode-usageに関する内容を、目的と確認できた事実に分けて記載してください。
+        Cookie、認証トークン、パスワード、個人情報を本文や添付に含めないでください。認証コード、Wi-Fi認証情報、NVS・全フラッシュのダンプ、個人設定入りファームウェアも添付しないでください。
+        投稿前に[README](https://github.com/roflsunriz/esp32-opencode-usage/blob/main/README.md)と[既存Issue](https://github.com/roflsunriz/esp32-opencode-usage/issues)を確認してください。
+        脆弱性の報告は[SECURITY.md](https://github.com/roflsunriz/esp32-opencode-usage/blob/main/SECURITY.md)の案内に従ってください。
+  - type: textarea
+    id: legacy-1
+    attributes:
+      label: 達成したい目的と相談内容
+      description: 何を設定したいか、現在どこで止まっているかを書いてください。
+    validations:
+      required: false
+  - type: textarea
+    id: legacy-2
+    attributes:
+      label: 対象と環境
+      description: OS、Bun、PlatformIO、ボード、LCD、USBシリアルかLANかを、秘密情報を除いて書いてください。
+    validations:
+      required: false
+  - type: textarea
+    id: legacy-3
+    attributes:
+      label: 試したことと結果
+      description: 実行した手順、期待した結果、実際の結果を書いてください。Cookie、Bearer token、Wi-Fiパスワード、`.private/` の内容は貼り付けないでください。
+    validations:
+      required: false
+  - type: textarea
+    id: additional-common
+    attributes:
+      label: 補足
+      description: 関連資料と、確認できなかった条件を記載してください。
+    validations:
+      required: false
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 公開情報の確認
+      options:
+        - label: 本文と添付に秘密情報や個人情報が含まれていないことを確認しました。
+          required: true

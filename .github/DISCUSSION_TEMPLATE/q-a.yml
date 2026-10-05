@@ -1,11 +1,14 @@
-name: Q&A
-description: 使い方や設定について質問する
-title: "[Q&A] "
+title: '[質問] '
 body:
   - type: markdown
     attributes:
-      value: |
-        Cookie、Bearer token、Wi-Fiパスワード、個人情報は投稿しないでください。
+      value: |-
+        esp32-opencode-usageに関する内容を、目的と確認できた事実に分けて記載してください。
+        Cookie、認証トークン、パスワード、個人情報を本文や添付に含めないでください。認証コード、Wi-Fi認証情報、NVS・全フラッシュのダンプ、個人設定入りファームウェアも添付しないでください。
+        Q&A / 使い方や設定について質問する
+  - type: markdown
+    attributes:
+      value: Cookie、Bearer token、Wi-Fiパスワード、個人情報は投稿しないでください。
   - type: textarea
     id: question
     attributes:
@@ -16,12 +19,26 @@ body:
   - type: textarea
     id: environment
     attributes:
-      label: 環境
+      label: 対象と環境
       description: OS、Bun、PlatformIO、ボード、LCD、接続方法を書いてください。
     validations:
       required: true
   - type: textarea
     id: tried
     attributes:
-      label: 試したこと
+      label: 試したことと結果
       description: 手順、結果、秘密情報を除いたエラーやログを書いてください。
+  - type: textarea
+    id: additional-common
+    attributes:
+      label: 補足
+      description: 関連資料と、確認できなかった条件を記載してください。
+    validations:
+      required: false
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 公開情報の確認
+      options:
+        - label: 本文と添付に秘密情報や個人情報が含まれていないことを確認しました。
+          required: true
