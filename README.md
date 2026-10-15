@@ -118,29 +118,8 @@ powershell -ExecutionPolicy Bypass -File scripts/restore-firmware.ps1 -Port COM3
 
 ## 開発と検証
 
-```powershell
-bun run lint
-bun run format:check
-bun run type-check
-python -m mypy --strict host/serial-worker.py
-bun run build
-bun run test
-bun run audit
-pio test -e native
-pio run -e esp32dev
-```
-
-Python側の実行時USBはpySerialです。Node.js 24は開発用のfake fixtureテストだけで使い、製品のUSB通信経路には使いません。
-
-- [更新と復旧](how-to-update.md)
-- [取得方式・通信仕様](docs/protocol.md)
-- [依存関係とライセンス](docs/dependencies.md)
-- [セキュリティ](SECURITY.md)
-
-本プロジェクトはOpenCode非公式です。公式コンソール、認証方式、HTTPS証明書、使用量応答の変更で更新が必要になる場合があります。
+詳細は [findings.md](findings.md#readme-1) に移しました。
 
 ## 依存更新の自動処理
 
-Dependabot は pip／Bun の依存関係を毎週、GitHub Actionsを毎月確認します。依存更新は PR のチェック（CI）が成功した後に自動で squash merge されます。CI の失敗ジョブは 1 回だけ再実行し、設定されたlockfileの修復も試みます。再失敗した PR は残して手動で修正します。
-
-Dependabot設定が参照するラベルは、設定変更時・ラベルの編集/削除時・毎日の検査で不足分だけ自動作成します。既存ラベルの色・説明は変更しません。開発・CI・Releaseは `.bun-version` の版を使用し、Dependabotが読める `bun.lock` 形式1の生成には `bun run deps:lock` を使います。手順は [依存更新](how-to-update.md#dependabot-pr-の更新) を参照してください。
+詳細は [findings.md](findings.md#readme-2) に移しました。
