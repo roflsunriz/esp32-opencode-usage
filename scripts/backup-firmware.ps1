@@ -9,9 +9,9 @@ Set-Location -LiteralPath (Split-Path -Parent $PSScriptRoot)
 $backupPath = [System.IO.Path]::GetFullPath($OutputPath)
 if (Test-Path -LiteralPath $backupPath) { throw '既存バックアップを上書きしません。別の出力先を指定してください。' }
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $backupPath) | Out-Null
-& $Python -m esptool --port $Port --baud 460800 read-flash 0 ALL $backupPath
+& $Python -m esptool --chip esp32 --port $Port --baud 460800 --after no_reset read-flash 0 ALL $backupPath
 if ($LASTEXITCODE -ne 0) { throw '全フラッシュの退避に失敗しました。書き込みを行わないでください。' }
-& $Python -m esptool --port $Port --baud 460800 verify-flash 0 $backupPath
+& $Python -m esptool --chip esp32 --port $Port --baud 460800 --before no_reset --after no_reset verify-flash 0 $backupPath
 if ($LASTEXITCODE -ne 0) { throw 'バックアップと実機が一致しません。書き込みを行わないでください。' }
 $file = Get-Item -LiteralPath $backupPath
 $manifest = @{ version = 1; size = $file.Length; sha256 = (Get-FileHash -LiteralPath $backupPath -Algorithm SHA256).Hash; createdAt = (Get-Date).ToUniversalTime().ToString('o') }

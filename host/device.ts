@@ -17,6 +17,14 @@ export interface DeviceConfig {
   requestId?: string;
 }
 
+export interface DeviceAuthentication {
+  version: 1;
+  type: "auth";
+  authCookie: string;
+  workspace: string;
+  requestId?: string;
+}
+
 type Worker = Bun.Subprocess<"pipe", "pipe", "ignore">;
 type Completion = {
   resolve(): void;
@@ -145,10 +153,8 @@ export class DeviceConnection {
         const value: unknown = JSON.parse(line);
         if (!value || typeof value !== "object") continue;
         const response = value as Record<string, unknown>;
-        if (
-          response.firmware === "opencode-go-lcd" &&
-          response.setupSchema === 3
-        )
+        const recognizedFirmware = response.firmware === "opencode-go-lcd";
+        if (recognizedFirmware && response.setupSchema === 4)
           this.compatible = true;
         if (this.compatible) {
           if (typeof response.backlightTimeoutSec === "number")
@@ -157,11 +163,21 @@ export class DeviceConnection {
             this.backlightOn = response.backlightOn;
         }
         if (response.type === "ready") {
-          this.message = "LCD起動済み";
+          this.message = this.compatible
+            ? "LCD起動済み"
+            : recognizedFirmware
+              ? "LCD用ファームウェアの更新が必要です"
+              : "互換性のないUSB機器です";
           if (this.lastFrame)
             void this.send(this.lastFrame).catch(() => undefined);
         } else if (response.type === "ack") {
-          this.message = "LCD受信確認済み";
+          this.message = this.compatible
+            ? response.accepted === "auth"
+              ? "ログイン情報をESP32へ保存しました"
+              : "LCD受信確認済み"
+            : recognizedFirmware
+              ? "LCD用ファームウェアの更新が必要です"
+              : "互換性のないUSB機器です";
           if (
             response.accepted === "usage" &&
             response.source === "http" &&
@@ -300,6 +316,7 @@ export class DeviceConnection {
     frame:
       | UsageFrame
       | DeviceConfig
+      | DeviceAuthentication
       | { version: 1; type: "ping" }
       | {
           version: 1;
@@ -316,16 +333,18 @@ export class DeviceConnection {
     if (!child || !this.connected || child.exitCode !== null) {
       if (
         frame.type === "config" ||
+        frame.type === "auth" ||
         frame.type === "display" ||
         frame.type === "wake"
       )
-        throw new Error("Wi-Fi設定の保存にはUSB接続が必要です。");
+        throw new Error("ESP32への設定保存にはUSB接続が必要です。");
       return;
     }
     let outgoing = frame;
     let acknowledged: Promise<void> | undefined;
     if (
       frame.type === "config" ||
+      frame.type === "auth" ||
       frame.type === "display" ||
       frame.type === "wake"
     ) {
@@ -333,8 +352,9 @@ export class DeviceConnection {
         throw new Error(
           "初期設定用ファームウェアを確認できません。LCD用ファームウェアを書き込み、再接続してください。",
         );
-      if (frame.type === "config") this.lastDirectUpdate = undefined;
-      if (this.pendingConfig) throw new Error("別のWi-Fi設定を保存中です。");
+      if (frame.type === "config" || frame.type === "auth")
+        this.lastDirectUpdate = undefined;
+      if (this.pendingConfig) throw new Error("別の設定を保存中です。");
       const requestId = randomBytes(8).toString("hex");
       outgoing = { ...frame, requestId };
       acknowledged = new Promise<void>((resolve, reject) => {

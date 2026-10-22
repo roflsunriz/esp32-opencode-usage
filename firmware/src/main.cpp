@@ -319,6 +319,19 @@ void sendConfigAck(const char *requestId) {
   Serial.println();
 }
 
+void sendAuthAck(const char *requestId) {
+  JsonDocument document;
+  document["version"] = usage_model::kProtocolVersion;
+  document["type"] = "ack";
+  document["accepted"] = "auth";
+  document["requestId"] = requestId;
+  document["wifiEnabled"] = wifiConfig.enabled;
+  document["pollIntervalSec"] = wifiConfig.pollIntervalSec;
+  addBacklightState(document, false);
+  serializeJson(document, Serial);
+  Serial.println();
+}
+
 void sendDisplayAck(const char *requestId) {
   JsonDocument document;
   document["version"] = usage_model::kProtocolVersion;
@@ -676,6 +689,36 @@ bool processFrame(const char *payload, const char *source) {
                                           : "Setup cleared - use PC",
                        ILI9341_GREEN);
     sendConfigAck(requestId);
+    return true;
+  }
+
+  if (strcmp(type, "auth") == 0) {
+    const char *requestId = nullptr;
+    if (!readRequestId(root, requestId, error, sizeof(error), true)) {
+      sendError(error);
+      return false;
+    }
+    static config_store::WiFiConfig parsed;
+    parsed = wifiConfig;
+    if (!readString(root["authCookie"], parsed.authCookie,
+                    sizeof(parsed.authCookie), true) ||
+        !readString(root["workspace"], parsed.workspace,
+                    sizeof(parsed.workspace), true) ||
+        !config_store::validate(parsed, error, sizeof(error))) {
+      if (error[0] == '\0') {
+        setErrorText(error, sizeof(error), "authentication fields are invalid");
+      }
+      sendError(error);
+      return false;
+    }
+    if (!configStore.save(parsed, error, sizeof(error))) {
+      sendError(error);
+      return false;
+    }
+    wifiConfig = parsed;
+    networkClient.setConfig(wifiConfig);
+    display.showStatus("OpenCode login saved", ILI9341_GREEN);
+    sendAuthAck(requestId);
     return true;
   }
 

@@ -113,10 +113,24 @@ export function startServer(service: UsageService, options: { port: number }) {
                 await saveSession(session);
                 service.setSession(session);
                 await service.refresh();
+                const device = service.device.status();
+                if (device.connected && device.compatible) {
+                  try {
+                    await service.syncDeviceAuthentication();
+                  } catch (error) {
+                    loginFailure = `PCへのログインは保存しましたが、ESP32への保存に失敗しました。${
+                      error instanceof Error
+                        ? error.message
+                        : "USB接続を確認してください。"
+                    }`;
+                  }
+                }
               })
-              .catch(() => {
+              .catch((error: unknown) => {
                 loginFailure =
-                  "ログインを完了できませんでした。公式画面を確認して、もう一度ログインしてください。";
+                  error instanceof Error
+                    ? error.message
+                    : "ログインを完了できませんでした。公式画面を確認して、もう一度ログインしてください。";
               })
               .finally(() => {
                 loginPending = false;
@@ -140,6 +154,10 @@ export function startServer(service: UsageService, options: { port: number }) {
             return json({ ok: true });
           case "/api/disconnect":
             await service.device.close();
+            return json({ ok: true });
+          case "/api/device-auth":
+            await service.syncDeviceAuthentication();
+            loginFailure = undefined;
             return json({ ok: true });
           case "/api/setup": {
             if (

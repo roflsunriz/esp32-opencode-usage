@@ -1,13 +1,13 @@
 {
   "name": "esp32-opencode-usage",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/bun": "latest",
-    "eslint": "^10.11.0",
+    "eslint": "^10.13.0",
     "prettier": "^3.9.10",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.71.2"
+    "typescript-eslint": "^8.72.0"
   },
   "engines": {
     "bun": ">=1.4"

@@ -67,7 +67,10 @@ const server = createServer((socket) => {
           result = { value: null };
           break;
         case "WebDriver:GetCurrentURL":
-          result = { value: selectedHandle === "go-tab" ? "https://opencode.ai/console/wrk_test/go" : "https://example.invalid/" };
+          result = { value: selectedHandle === "go-tab" ? "https://opencode.ai/console/wrk_0123456789/go" : "https://opencode.ai/console/workspace" };
+          break;
+        case "WebDriver:ExecuteScript":
+          result = { value: ["https://opencode.ai/console/wrk_0123456789/go"] };
           break;
         case "WebDriver:GetCookies":
           result = [{ name: "__Host-console_session", value: "test-value", domain: "opencode.ai", expiry: 2000000000 }];
@@ -215,7 +218,7 @@ describe("認証情報の保存", () => {
       const session: StoredSession = {
         version: 1,
         cookie: "__Host-console_session=test-value",
-        workspace: "wrk_test",
+        workspace: "wrk_0123456789",
         expiresAt: 2_000_000_000_000,
       };
       await store.save(session);
@@ -256,13 +259,13 @@ describe("Firefox Marionette の認証取得", () => {
         login({
           launch: false,
           port: firefox.port,
-          workspace: "wrk_test",
+          workspace: "wrk_0123456789",
           timeoutMs: 2_000,
         }),
       ).resolves.toEqual({
         version: 1,
         cookie: "__Host-console_session=test-value",
-        workspace: "wrk_test",
+        workspace: "wrk_0123456789",
         expiresAt: 2_000_000_000_000,
       });
       expect(await firefox.commands()).toEqual([
@@ -271,8 +274,7 @@ describe("Firefox Marionette の認証取得", () => {
         "WebDriver:GetWindowHandles",
         "WebDriver:SwitchToWindow",
         "WebDriver:GetCurrentURL",
-        "WebDriver:SwitchToWindow",
-        "WebDriver:GetCurrentURL",
+        "WebDriver:ExecuteScript",
         "WebDriver:GetCookies",
         "WebDriver:SwitchToWindow",
         "WebDriver:DeleteSession",

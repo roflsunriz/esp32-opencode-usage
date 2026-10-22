@@ -135,3 +135,69 @@ test("display settings and wake each wait for their corresponding ACK", async ()
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("authentication-only update waits for ACK and sends no Wi-Fi fields", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lcd-worker-"));
+  const log = join(directory, "frames.jsonl");
+  const device = new DeviceConnection(
+    () => ["node", fixture, log],
+    async () => [{ path: "TEST", label: "fake" }],
+  );
+  try {
+    await device.connect("TEST");
+    await Bun.sleep(20);
+    await device.send({
+      version: 1,
+      type: "auth",
+      authCookie: "__Host-console_session=new-session",
+      workspace: "wrk_0123456789ABCDEF",
+    });
+    await device.close();
+    const frames = (await readFile(log, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const auth = frames.find((frame) => frame.type === "auth");
+    expect(auth).toMatchObject({
+      type: "auth",
+      authCookie: "__Host-console_session=new-session",
+      workspace: "wrk_0123456789ABCDEF",
+    });
+    expect(auth?.requestId).toMatch(/^[0-9a-f]{16}$/);
+    expect(auth).not.toHaveProperty("ssid");
+    expect(auth).not.toHaveProperty("password");
+  } finally {
+    await device.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("old setup schema cannot receive renewed credentials", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lcd-worker-"));
+  const log = join(directory, "frames.jsonl");
+  const device = new DeviceConnection(
+    () => ["node", fixture, log, "OLD"],
+    async () => [{ path: "OLD", label: "fake" }],
+  );
+  try {
+    await device.connect("OLD");
+    await Bun.sleep(20);
+    expect(device.status()).toMatchObject({
+      connected: true,
+      compatible: false,
+      message: "LCD用ファームウェアの更新が必要です",
+    });
+    await expect(
+      device.send({
+        version: 1,
+        type: "auth",
+        authCookie: "__Host-console_session=must-stay-on-host",
+        workspace: "wrk_0123456789ABCDEF",
+      }),
+    ).rejects.toThrow("ファームウェア");
+    expect(await readFile(log, "utf8")).not.toContain("must-stay-on-host");
+  } finally {
+    await device.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

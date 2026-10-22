@@ -1,5 +1,19 @@
 # 検証
 
+## 2026-10-22: 再ログインとESP32認証更新
+
+- 実行中の `localhost:8765` を読み取り確認し、COM7はUSB接続・旧 `setupSchema=3` 互換判定済みだった一方、PCは未認証で、ログイン完了を取り込めない状態を確認した。認証用Firefoxのプロファイルはロック中、Marionetteポート2829は待受なしで、再試行のたびに同じFirefoxへタブだけが追加される状態だった。
+- ログインごとの分離Firefoxプロファイル、認証のみを更新するUSBフレーム、`setupSchema=4` の互換確認、ログイン後の自動保存、手動再送を追加した。ホスト41件のテストに成功し、認証更新にSSID・パスワードが混入しないこと、相関ID付きACKを待つこと、旧schemaへCookieを送らないことを確認した。
+- `bun run lint`、`bun run format:check`、`bun run type-check`、`bun run build`、native 47件のテストに成功した。ESP32ビルドはRAM 76,620バイト（23.4%）、Flash 997,485バイト（76.1%）で成功した。
+- 最初のBIN生成は、過去の別実行環境が所有する `.platformio/packages/tool-esptoolpy/_contrib` のACLにより失敗した。破損パッケージを同じキャッシュ内へ退避して公式PlatformIOパッケージを再導入し、同じビルドを成功させた。ソースや利用者データは削除していない。
+- 全フラッシュ退避・復元スクリプトは、読み書き後を `--after no_reset`、続く照合前を `--before no_reset` に変更した。Wi-Fi設定済み基板が再起動時にNVSを更新しても、退避直後・復元直後の同じ状態を照合する。
+- COM7のESP32-D0WD-V3・4MBを `.private/backups/before-auth-refresh-20261022.bin` へ全フラッシュ退避し、読み出しと照合の間をno-resetにしてdigest一致を確認した（4,194,304バイト、SHA-256 `33BD8EC92E4D7422431589CD3727AD4A0970442BAF184ED9EAE7F5AAA53F05A4`）。NVSを含まないアプリ領域 `0x10000` だけへローカルビルドBINを書き込み、1004064バイトのdigest一致を確認した。
+- 更新後のCOM7で `setupSchema=4` の互換確認と消灯120秒の保持を確認した。最初の再ログイン実測で、公式の完了先 `/console/workspace` をワークスペースID `workspace` と誤認する別の原因を検出したため、`wrk_` 形式だけを受理し、一覧の一意なリンクからIDを取得する回帰テストを追加した。
+- 修正版ホストで公式GitHubログインを完了し、PCの認証・3期間の使用量取得・認証のみのESP32保存ACK・ESP32直接更新を確認した。その後にRSTで再起動し、PCから使用量を送らない状態で直接更新時刻が進んだため、NVSへ保存した新Cookieとワークスペースの読み戻し、Wi-Fi直接取得、既存の消灯120秒保持まで実機確認した。
+- 認証用Firefoxの通常終了は、Mozilla公式Marionetteクライアントと同じ `Marionette:Quit` を使うようにした。外部Firefoxへattachする場合は従来どおりWebDriverセッションだけを削除し、利用者のブラウザを終了しない。
+- 旧実装が残した分離プロファイルは、ほかの `.private` データと区別できる `firefox-logins/profile-*` だけをホスト起動時とログイン前に回収する。実行中で削除できない場合はログインの終了処理と次回起動で再試行する。
+- 0.4.3公開前にPython要件どおりmypy 2.4.0、Ruff 0.17.1、esptool 5.6.0、Pillow 12.3.0へローカル検証環境を更新し、Bun lockをESLint 10.13.0・typescript-eslint 8.72.0へ更新した。mypy strict、Ruff整形、lint、format、型検査、host build、41テスト、依存監査（98パッケージ・脆弱性なし）、native 47テスト、ESP32 buildが成功した。TypeScript 7.0.2はtypescript-eslint 8.72.0の対応範囲外、Espressif platform 8.0.0は今回実機検証した7.1.3と異なるメジャー版のため維持した。
+
 ## 2026-10-19: CI高速化
 
 - 変更したGitHub Actionsをactionlint 1.7.12で検査し、エラー0件を確認した。

@@ -25,7 +25,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isWorkspace(value: string): boolean {
-  return /^[A-Za-z0-9_-]{1,200}$/.test(value);
+  return /^wrk_[A-Za-z0-9]{10,80}$/.test(value);
 }
 
 function isCookie(value: string): boolean {

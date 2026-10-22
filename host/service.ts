@@ -109,6 +109,21 @@ export class UsageService {
     });
   }
 
+  async syncDeviceAuthentication(): Promise<void> {
+    const session = this.session;
+    if (!session) throw new Error("先にOpenCodeへログインしてください。");
+    if (session.cookie.length > 4096)
+      throw new Error(
+        "認証情報が機器の保存上限を超えています。専用のログイン画面から再ログインしてください。",
+      );
+    await this.device.send({
+      version: 1,
+      type: "auth",
+      authCookie: session.cookie,
+      workspace: session.workspace,
+    });
+  }
+
   async clearDevice(): Promise<void> {
     const config: DeviceConfig = {
       version: 1,

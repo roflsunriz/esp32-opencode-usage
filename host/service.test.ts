@@ -63,4 +63,21 @@ describe("usage service states", () => {
     expect(service.status().authenticated).toBe(false);
     await service.stop();
   });
+
+  test("sends only renewed authentication fields to a connected device", async () => {
+    const service = new UsageService(() => ({ usage: async () => frame }));
+    service.setSession(session);
+    let sent: Parameters<typeof service.device.send>[0] | undefined;
+    service.device.send = async (value) => {
+      sent = value;
+    };
+    await service.syncDeviceAuthentication();
+    expect(sent).toEqual({
+      version: 1,
+      type: "auth",
+      authCookie: session.cookie,
+      workspace: session.workspace,
+    });
+    await service.stop();
+  });
 });

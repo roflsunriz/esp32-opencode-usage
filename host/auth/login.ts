@@ -1,5 +1,12 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { basename, join } from "node:path";
 
 import { connectMarionette, type MarionetteClient } from "./marionette.ts";
@@ -12,6 +19,40 @@ const loginOrigin = "https://opencode.ai";
 
 type AuthCookie = Pick<StoredSession, "cookie" | "expiresAt">;
 
+function loginProfilesDirectory(): string {
+  return join(process.cwd(), ".private", "firefox-logins");
+}
+
+export async function cleanupLoginProfiles(): Promise<void> {
+  const directory = loginProfilesDirectory();
+  let names: string[];
+  try {
+    names = await readdir(directory);
+  } catch (error) {
+    if (isMissingFile(error)) return;
+    throw new Error("Firefox の認証用プロファイルを整理できませんでした。", {
+      cause: error,
+    });
+  }
+  await Promise.all(
+    names
+      .filter((name) => /^profile-[A-Za-z0-9_-]+$/.test(name))
+      .map(async (name) => {
+        try {
+          await rm(join(directory, name), {
+            recursive: true,
+            force: true,
+            maxRetries: 20,
+            retryDelay: 250,
+          });
+        } catch {
+          // A still-running login owns this profile. The login's own cleanup
+          // retries it, and the next host start will recover any residue.
+        }
+      }),
+  );
+}
+
 function authenticationError(): Error {
   return new Error(
     "OpenCode へのログインを確認できませんでした。Firefox でログイン後、対象のワークスペースを開いてから再試行してください。",
@@ -23,7 +64,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isWorkspace(value: string): boolean {
-  return /^[A-Za-z0-9_-]{1,200}$/.test(value);
+  return /^wrk_[A-Za-z0-9]{10,80}$/.test(value);
 }
 
 function isMissingFile(error: unknown): boolean {
@@ -200,7 +241,7 @@ function launchFirefox(
   executable: string,
   profileDirectory: string,
   loginUrl: string,
-): void {
+): Bun.Subprocess {
   const child = Bun.spawn(
     [
       executable,
@@ -217,6 +258,7 @@ function launchFirefox(
     },
   );
   child.unref();
+  return child;
 }
 
 async function waitForProfilePort(
@@ -283,6 +325,48 @@ function windowHandles(value: unknown): string[] | undefined {
     : undefined;
 }
 
+function stringArray(value: unknown): string[] | undefined {
+  const candidate = Array.isArray(value)
+    ? value
+    : isRecord(value) && Array.isArray(value.value)
+      ? value.value
+      : undefined;
+  return candidate && candidate.every((item) => typeof item === "string")
+    ? candidate
+    : undefined;
+}
+
+async function workspaceFromCurrentPage(
+  client: MarionetteClient,
+  currentUrl: string,
+  expectedWorkspace: string | undefined,
+): Promise<string | undefined> {
+  const current = workspaceFromUrl(currentUrl);
+  if (current) return current;
+  if (!isOpencodeUrl(currentUrl)) return undefined;
+
+  const links = stringArray(
+    await client.command("WebDriver:ExecuteScript", {
+      script:
+        "return Array.from(document.querySelectorAll('a[href]'), a => a.href);",
+      args: [],
+    }),
+  );
+  if (!links) return undefined;
+  const candidates = [
+    ...new Set(
+      links
+        .map((link) => workspaceFromUrl(link))
+        .filter((item): item is string => item !== undefined),
+    ),
+  ];
+  if (expectedWorkspace)
+    return candidates.includes(expectedWorkspace)
+      ? expectedWorkspace
+      : undefined;
+  return candidates.length === 1 ? candidates[0] : undefined;
+}
+
 async function sessionInCurrentTab(
   client: MarionetteClient,
   expectedWorkspace: string | undefined,
@@ -290,7 +374,12 @@ async function sessionInCurrentTab(
   const currentUrl = valueString(
     await client.command("WebDriver:GetCurrentURL", {}),
   );
-  const workspace = workspaceFromUrl(currentUrl);
+  if (!currentUrl) return undefined;
+  const workspace = await workspaceFromCurrentPage(
+    client,
+    currentUrl,
+    expectedWorkspace,
+  );
   if (
     !workspace ||
     (expectedWorkspace && workspace !== expectedWorkspace) ||
@@ -363,11 +452,17 @@ async function connectAfterLaunch(
 async function connectForLogin(
   options: ReturnType<typeof validateOptions>,
   deadline: number,
-): Promise<MarionetteClient> {
+): Promise<{
+  client: MarionetteClient;
+  cleanup(): Promise<void>;
+}> {
   if (!options.launch) {
     const connectTimeout = Math.min(commandTimeoutMs, remaining(deadline));
     if (connectTimeout < 1) throw authenticationError();
-    return connectMarionette(options.port ?? 2828, connectTimeout);
+    return {
+      client: await connectMarionette(options.port ?? 2828, connectTimeout),
+      async cleanup() {},
+    };
   }
 
   if (process.platform !== "win32") {
@@ -375,33 +470,60 @@ async function connectForLogin(
       "Firefox を使ったログインは現在 Windows のみ対応しています。",
     );
   }
-  const profileDirectory = join(process.cwd(), ".private", "firefox");
-  const activeProfilePort = await readProfilePort(profileDirectory);
-  if (
-    activeProfilePort !== undefined &&
-    (options.port === undefined || options.port === activeProfilePort)
-  ) {
-    try {
-      return await connectMarionette(
-        activeProfilePort,
-        Math.min(commandTimeoutMs, remaining(deadline)),
-      );
-    } catch {
-      // Stale profile state is replaced below before starting a new Firefox.
-    }
-  }
+  // DeleteSession stops the Marionette listener but can leave Firefox open.
+  // A persistent profile then remains locked and later login attempts merely
+  // add tabs to that listener-less process. Use an isolated profile per login
+  // and remove both the app-owned process and its cookie store afterwards.
+  const profilesDirectory = loginProfilesDirectory();
+  await cleanupLoginProfiles();
+  await mkdir(profilesDirectory, { recursive: true });
+  const profileDirectory = await mkdtemp(join(profilesDirectory, "profile-"));
   const configuredPort = options.port ?? 0;
-  await prepareFirefoxProfile(profileDirectory, configuredPort);
-  launchFirefox(
-    findFirefoxExecutable(),
-    profileDirectory,
-    buildLoginUrl(options.workspace),
-  );
-  const port =
-    configuredPort === 0
-      ? await waitForProfilePort(profileDirectory, deadline)
-      : configuredPort;
-  return connectAfterLaunch(port, deadline);
+  let child: Bun.Subprocess | undefined;
+  try {
+    await prepareFirefoxProfile(profileDirectory, configuredPort);
+    child = launchFirefox(
+      findFirefoxExecutable(),
+      profileDirectory,
+      buildLoginUrl(options.workspace),
+    );
+    const port =
+      configuredPort === 0
+        ? await waitForProfilePort(profileDirectory, deadline)
+        : configuredPort;
+    const client = await connectAfterLaunch(port, deadline);
+    return {
+      client,
+      async cleanup() {
+        if (child?.exitCode === null) child.kill();
+        if (child) {
+          await Promise.race([child.exited, delay(5_000)]);
+          if (child.exitCode === null) child.kill();
+        }
+        try {
+          await rm(profileDirectory, {
+            recursive: true,
+            force: true,
+            maxRetries: 20,
+            retryDelay: 250,
+          });
+        } catch {
+          // The session is already copied into DPAPI-protected storage by the
+          // caller. A delayed Firefox child must not turn that success into a
+          // login failure; the ignored .private profile can be retried later.
+        }
+      },
+    };
+  } catch (error) {
+    if (child?.exitCode === null) child.kill();
+    await rm(profileDirectory, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
+    throw error;
+  }
 }
 
 export async function login(
@@ -409,7 +531,8 @@ export async function login(
 ): Promise<StoredSession> {
   const validated = validateOptions(options);
   const deadline = Date.now() + validated.timeoutMs;
-  const client = await connectForLogin(validated, deadline);
+  const connection = await connectForLogin(validated, deadline);
+  const { client } = connection;
   let sessionStarted = false;
   try {
     await startSession(client);
@@ -429,11 +552,21 @@ export async function login(
     throw authenticationError();
   } finally {
     try {
-      if (sessionStarted) await client.command("WebDriver:DeleteSession", {});
+      if (sessionStarted) {
+        try {
+          await client.command(
+            validated.launch ? "Marionette:Quit" : "WebDriver:DeleteSession",
+            {},
+          );
+        } catch {
+          // Session teardown must not replace a successfully captured login.
+        }
+      }
     } finally {
-      // DeleteSession と socket close で Marionette セッションだけを解放する。
-      // Marionette:Quit や Firefox プロセス終了は実行しない。
+      // 外部から接続したFirefoxはセッションだけを解放する。アプリが
+      // 起動した分離Firefoxはcleanupで終了し、Cookie保存先も削除する。
       client.close();
+      await connection.cleanup();
     }
   }
 }

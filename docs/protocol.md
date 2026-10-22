@@ -60,6 +60,22 @@ USBは115200 baud、1行につき1つのJSONです。設定フレームのフィ
 
 保存失敗、形式不正、CRC不一致は `error` フレームで返し、PCは設定完了として扱いません。`enabled:false` と空文字列の設定を送ると、ESP32側のWi-Fi・認証情報・取得先情報を削除します。
 
+## 認証更新フレーム
+
+再ログイン時は `type:"auth"` でセッションCookieとワークスペースだけを更新します。ESP32は既存のWi-Fi SSID・パスワード、取得間隔、消灯時間、画面の向き、有効状態を保持し、更新後の設定全体を同じCRC付きNVSレコードへ保存します。
+
+```json
+{
+  "version": 1,
+  "type": "auth",
+  "authCookie": "__Host-console_session=...",
+  "workspace": "wrk_...",
+  "requestId": "0123456789abcdef"
+}
+```
+
+保存後は `accepted:"auth"` と同じ `requestId` のACKを返します。ACKにCookie、Wi-Fiパスワード、SSID、ワークスペースは含めません。ホストは `firmware=opencode-go-lcd` と `setupSchema=4` を確認できた機器にだけ認証情報を送ります。
+
 ## 使用量フレームとACK
 
 USB表示用の使用量フレームは次の形です。
@@ -171,7 +187,7 @@ MOSI=13、MISO=12、SCLK=14、CS=15、DC=2、BL=21、RST=-1。ILI9341の描画�
 
 消灯判定とBOOTの検出はHTTPS通信とは独立した10ms周期のタイマーで行う。タッチの起床はGPIO36の割り込みで受け付け、実際の画面設定はLCD上のUsage/Displayタブから行う。
 
-NVS schema 2/3のCRCが正常ならWi-Fi・認証などを保持してschema 4へ移行する。schema 2では消灯時間60秒を補い、schema 3の消灯時間は保持する。画面の向きは通常向きを初期値とする。USBの設定形式は変わらないため、認証送信前の `setupSchema` は3を維持する。
+NVS schema 2/3のCRCが正常ならWi-Fi・認証などを保持してschema 4へ移行する。schema 2では消灯時間60秒を補い、schema 3の消灯時間は保持する。画面の向きは通常向きを初期値とする。USBの `setupSchema` は認証だけを更新するフレームを追加したため4とし、PreferencesのNVS schema 4とは別に管理する。
 
 ## BOOTによる画面反転
 
@@ -179,7 +195,7 @@ GPIO0のLOW/HIGHがそれぞれ30ms安定した押下・解放を1クリック�
 
 タッチ座標は反転時に `x=319-x, y=239-y` を適用する。BOOT操作は消灯期限を再設定して点灯する。Usage/Displayタブ、表示データ、状態メッセージ、消灯設定は維持する。
 
-保存成功時は `accepted:"display"` のACKを返し、`screenFlipped` に保存済みの向きを示す（BOOT操作にはrequestIdなし）。ready、ping、config/display/wake ACKにも同じ値を含める。保存失敗時は向きを変更せずerrorを返す。PCからの初期設定・認証削除・消灯時間変更は向きを保持する。
+保存成功時は `accepted:"display"` のACKを返し、`screenFlipped` に保存済みの向きを示す（BOOT操作にはrequestIdなし）。ready、ping、config/auth/display/wake ACKにも同じ値を含める。保存失敗時は向きを変更せずerrorを返す。PCからの初期設定・認証更新・認証削除・消灯時間変更は向きを保持する。
 
 配線の根拠: [Apache NuttXの本ボードのBOOT説明](https://nuttx.apache.org/docs/12.8.0/platforms/xtensa/esp32/boards/esp32-2432S028/index.html#board-buttons)。
 

@@ -5,6 +5,7 @@ const log = process.argv[2]!;
 const broken = process.argv.at(-1) === "BREAK";
 const firmware =
   process.argv.at(-1) === "WRONG" ? "other-firmware" : "opencode-go-lcd";
+const setupSchema = process.argv.at(-1) === "OLD" ? 3 : 4;
 function emit(value: unknown) {
   process.stdout.write(JSON.stringify(value) + "\n");
 }
@@ -12,7 +13,7 @@ function rx(value: unknown) {
   emit({ type: "data", data: JSON.stringify(value) + "\n" });
 }
 emit({ type: "open" });
-rx({ version: 1, type: "ready", firmware, setupSchema: 3 });
+rx({ version: 1, type: "ready", firmware, setupSchema });
 createInterface({ input: process.stdin }).on("line", (line) => {
   const command = JSON.parse(line) as {
     type: string;
@@ -35,9 +36,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   appendFileSync(log, JSON.stringify(frame) + "\n");
   emit({ type: "written", id: command.id });
   if (frame.type === "ping")
-    rx({ type: "ack", accepted: "ping", firmware, setupSchema: 3 });
+    rx({ type: "ack", accepted: "ping", firmware, setupSchema });
   if (
     frame.type === "config" ||
+    frame.type === "auth" ||
     frame.type === "display" ||
     frame.type === "wake"
   ) {

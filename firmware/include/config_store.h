@@ -12,9 +12,9 @@ constexpr size_t kWorkspaceCapacity = 96;
 constexpr size_t kQueryIdCapacity = 65;
 constexpr uint32_t kDefaultPollIntervalSec = 60;
 constexpr uint32_t kDefaultBacklightTimeoutSec = 60;
-// The USB setup protocol remains at version 3 for compatibility. This is
-// independent from the on-device Preferences record schema.
-constexpr uint32_t kSetupSchemaVersion = 3;
+// Version 4 adds an authentication-only update that preserves Wi-Fi and
+// display settings. This is independent from the Preferences record schema.
+constexpr uint32_t kSetupSchemaVersion = 4;
 constexpr uint32_t kConfigSchemaVersion = 4;
 
 struct WiFiConfig {

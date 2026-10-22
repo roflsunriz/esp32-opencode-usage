@@ -1,5 +1,11 @@
 import { OpenCodeClient } from "./api.ts";
-import { clearSession, loadSession, login, saveSession } from "./auth/index.ts";
+import {
+  cleanupLoginProfiles,
+  clearSession,
+  loadSession,
+  login,
+  saveSession,
+} from "./auth/index.ts";
 import { DeviceConnection } from "./device.ts";
 import { UsageService } from "./service.ts";
 import { startServer } from "./server.ts";
@@ -41,6 +47,7 @@ async function main(): Promise<void> {
     console.log(help);
     return;
   }
+  await cleanupLoginProfiles();
   if (command === "login") {
     const attach = option(args, "--attach");
     console.log(
