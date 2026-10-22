@@ -5,22 +5,27 @@ updates:
   - package-ecosystem: pip
     directory: "/"
     schedule:
-      interval: weekly
+      interval: cron
+      cronjob: "0 0 28 * *"
+      timezone: "Asia/Tokyo"
     open-pull-requests-limit: 5
     labels:
       - dependencies
   - package-ecosystem: bun
     directory: "/"
     schedule:
-      interval: weekly
-      day: monday
+      interval: cron
+      cronjob: "0 0 28 * *"
+      timezone: "Asia/Tokyo"
     open-pull-requests-limit: 5
     labels:
       - dependencies
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: monthly
+      interval: cron
+      cronjob: "0 0 28 * *"
+      timezone: "Asia/Tokyo"
     open-pull-requests-limit: 5
     labels:
       - dependencies
