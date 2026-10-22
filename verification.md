@@ -13,6 +13,9 @@
 - 認証用Firefoxの通常終了は、Mozilla公式Marionetteクライアントと同じ `Marionette:Quit` を使うようにした。外部Firefoxへattachする場合は従来どおりWebDriverセッションだけを削除し、利用者のブラウザを終了しない。
 - 旧実装が残した分離プロファイルは、ほかの `.private` データと区別できる `firefox-logins/profile-*` だけをホスト起動時とログイン前に回収する。実行中で削除できない場合はログインの終了処理と次回起動で再試行する。
 - 0.4.3公開前にPython要件どおりmypy 2.4.0、Ruff 0.17.1、esptool 5.6.0、Pillow 12.3.0へローカル検証環境を更新し、Bun lockをESLint 10.13.0・typescript-eslint 8.72.0へ更新した。mypy strict、Ruff整形、lint、format、型検査、host build、41テスト、依存監査（98パッケージ・脆弱性なし）、native 47テスト、ESP32 buildが成功した。TypeScript 7.0.2はtypescript-eslint 8.72.0の対応範囲外、Espressif platform 8.0.0は今回実機検証した7.1.3と異なるメジャー版のため維持した。
+- main CI [run 39774081392](https://github.com/roflsunriz/esp32-opencode-usage/actions/runs/39774081392) は初回のWindows Bun 1.4.2がdevice test開始時にsegmentation faultした。コードのAssertion失敗ではなく、同じBun 1.4.2によるローカルWindows 41テストは成功した。失敗jobの再実行ではホスト・ファームウェア両jobが成功した。
+- Release [run 39774538495](https://github.com/roflsunriz/esp32-opencode-usage/actions/runs/39774538495) は成功し、[v0.4.3](https://github.com/roflsunriz/esp32-opencode-usage/releases/tag/v0.4.3) を公開した。ホスト80ファイル、ファームウェア51ファイルについてZIPとtar.gzの内容一致、package版0.4.3、必要な実行ファイルと個別BIN、秘密・`.private`・保存セッション・バックアップの非同梱、`firmware-full.bin` の0x10000以降と公開 `firmware.bin` の一致を確認した。
+- 公開Ubuntu BINは1,003,968バイト・SHA-256 `22D21AC9DD3BF3E7C4EAEFACD914B8606C0F512659E97265E47E538FF7DF5736`で、実機検証したWindowsローカルBIN（1,004,064バイト・`7EBF9EEB…`）とは一致しない。公開BINのbuildとnative 47テスト、構造・アーカイブ検査は成功したが、公開BINそのものの追加実機書き込みはユーザー判断により省略した。
 
 ## 2026-10-19: CI高速化
 
