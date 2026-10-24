@@ -60,6 +60,9 @@ public:
   int16_t touchPressureThreshold() const { return touchCalibration_.pressure; }
 
   bool setBacklightTimeoutSec(uint32_t timeoutSec);
+  void setUsageChangeWake(bool enabled);
+  void notifyUsageChanged();
+  void sleepBacklight();
   void wakeBacklight();
   bool consumeBacklightStateChanged();
   bool backlightOn();
@@ -109,6 +112,7 @@ private:
   usage_model::UsageSnapshot displayedSnapshot_;
   uint32_t displayedTimeoutSec_ = backlight_timer::kDefaultTimeoutSec;
   uint32_t displayedPollSec_ = config_store::kDefaultPollIntervalSec;
+  bool displayedUsageChangeWake_ = false;
   int16_t displayScroll_ = 0;
   uint32_t pollCountdownSec_ = UINT32_MAX;
   bool hasDisplayedSnapshot_ = false;
@@ -124,6 +128,7 @@ private:
   touch_ui::ReleaseLatch touchLatch_;
   touch_ui::ActionKind lastDragKind_ = touch_ui::ActionKind::kNone;
   uint32_t lastDragValue_ = 0;
+  uint32_t dragStartValue_ = 0;
   // Whole-content drag scrolling: the tap that starts a contact fixes the
   // gesture mode (slider adjust, scrollbar jump, or relative scroll).
   bool dragActive_ = false;

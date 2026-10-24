@@ -15,6 +15,7 @@ Preferences preferences;
 constexpr char kConfigKey[] = "config";
 constexpr uint32_t kPersistedConfigSchemaV2 = 2;
 constexpr uint32_t kPersistedConfigSchemaV3 = 3;
+constexpr uint32_t kPersistedConfigSchemaV4 = 4;
 
 struct PersistedConfigV2 {
   uint32_t schemaVersion;
@@ -59,10 +60,13 @@ struct PersistedConfigV4 {
   uint32_t checksum;
 };
 
+using PersistedConfigV5 = PersistedConfigV4;
+
 union PersistedStorage {
   PersistedConfigV2 v2;
   PersistedConfigV3 v3;
   PersistedConfigV4 v4;
+  PersistedConfigV5 v5;
 };
 
 PersistedStorage stored;
@@ -127,6 +131,11 @@ bool persistedCommonValuesAreValid(const Persisted &value) {
 bool persistedV4ValuesAreValid(const PersistedConfigV4 &value) {
   return persistedCommonValuesAreValid(value) && value.reserved[0] <= 1 &&
          value.reserved[1] == 0 && value.reserved[2] == 0;
+}
+
+bool persistedV5ValuesAreValid(const PersistedConfigV5 &value) {
+  return persistedCommonValuesAreValid(value) && value.reserved[0] <= 1 &&
+         value.reserved[1] <= 1 && value.reserved[2] == 0;
 }
 
 void setError(char *error, size_t capacity, const char *message) {
@@ -236,15 +245,29 @@ bool ConfigStore::load(WiFiConfig &config) {
   }
   bool recognizedRecord = false;
   bool migrateToCurrentSchema = false;
-  if (storedLength == sizeof(PersistedConfigV4)) {
+  if (storedLength == sizeof(PersistedConfigV5)) {
     memset(&stored, 0, sizeof(stored));
     if (preferences.getBytes(kConfigKey, &stored.v4, sizeof(stored.v4)) !=
         sizeof(stored.v4)) {
       preferences.remove(kConfigKey);
       return false;
     }
-    const uint32_t persistedSchema = stored.v4.schemaVersion;
+    const uint32_t persistedSchema = stored.v5.schemaVersion;
     if (persistedSchema == kConfigSchemaVersion) {
+      recognizedRecord = true;
+      const uint32_t expectedChecksum =
+          checksum(reinterpret_cast<const uint8_t *>(&stored.v5),
+                   offsetof(PersistedConfigV5, checksum));
+      if (stored.v5.checksum != expectedChecksum ||
+          !persistedV5ValuesAreValid(stored.v5)) {
+        preferences.remove(kConfigKey);
+        return false;
+      }
+      copyCommonConfig(config, stored.v5);
+      config.backlightTimeoutSec = stored.v5.backlightTimeoutSec;
+      config.screenFlipped = stored.v5.reserved[0] != 0;
+      config.usageChangeWake = stored.v5.reserved[1] != 0;
+    } else if (persistedSchema == kPersistedConfigSchemaV4) {
       recognizedRecord = true;
       const uint32_t expectedChecksum =
           checksum(reinterpret_cast<const uint8_t *>(&stored.v4),
@@ -257,6 +280,8 @@ bool ConfigStore::load(WiFiConfig &config) {
       copyCommonConfig(config, stored.v4);
       config.backlightTimeoutSec = stored.v4.backlightTimeoutSec;
       config.screenFlipped = stored.v4.reserved[0] != 0;
+      config.usageChangeWake = false;
+      migrateToCurrentSchema = true;
     } else if (persistedSchema == kPersistedConfigSchemaV3) {
       recognizedRecord = true;
       const uint32_t expectedChecksum =
@@ -270,6 +295,7 @@ bool ConfigStore::load(WiFiConfig &config) {
       copyCommonConfig(config, stored.v3);
       config.backlightTimeoutSec = stored.v3.backlightTimeoutSec;
       config.screenFlipped = false;
+      config.usageChangeWake = false;
       migrateToCurrentSchema = true;
     } else {
       // Keep records from a newer firmware intact so a later compatible
@@ -298,6 +324,7 @@ bool ConfigStore::load(WiFiConfig &config) {
     copyCommonConfig(config, stored.v2);
     config.backlightTimeoutSec = kDefaultBacklightTimeoutSec;
     config.screenFlipped = false;
+    config.usageChangeWake = false;
     migrateToCurrentSchema = true;
   } else {
     preferences.remove(kConfigKey);
@@ -331,23 +358,24 @@ bool ConfigStore::save(const WiFiConfig &config, char *error,
   }
 
   memset(&stored, 0, sizeof(stored));
-  stored.v4.schemaVersion = kConfigSchemaVersion;
-  stored.v4.enabled = config.enabled ? 1 : 0;
-  stored.v4.reserved[0] = config.screenFlipped ? 1 : 0;
-  memcpy(stored.v4.ssid, config.ssid, sizeof(stored.v4.ssid));
-  memcpy(stored.v4.password, config.password, sizeof(stored.v4.password));
-  memcpy(stored.v4.authCookie, config.authCookie,
-         sizeof(stored.v4.authCookie));
-  memcpy(stored.v4.workspace, config.workspace, sizeof(stored.v4.workspace));
-  memcpy(stored.v4.queryId, config.queryId, sizeof(stored.v4.queryId));
-  stored.v4.pollIntervalSec = config.pollIntervalSec;
-  stored.v4.backlightTimeoutSec = config.backlightTimeoutSec;
-  stored.v4.checksum = checksum(reinterpret_cast<const uint8_t *>(&stored.v4),
-                                offsetof(PersistedConfigV4, checksum));
+  stored.v5.schemaVersion = kConfigSchemaVersion;
+  stored.v5.enabled = config.enabled ? 1 : 0;
+  stored.v5.reserved[0] = config.screenFlipped ? 1 : 0;
+  stored.v5.reserved[1] = config.usageChangeWake ? 1 : 0;
+  memcpy(stored.v5.ssid, config.ssid, sizeof(stored.v5.ssid));
+  memcpy(stored.v5.password, config.password, sizeof(stored.v5.password));
+  memcpy(stored.v5.authCookie, config.authCookie,
+         sizeof(stored.v5.authCookie));
+  memcpy(stored.v5.workspace, config.workspace, sizeof(stored.v5.workspace));
+  memcpy(stored.v5.queryId, config.queryId, sizeof(stored.v5.queryId));
+  stored.v5.pollIntervalSec = config.pollIntervalSec;
+  stored.v5.backlightTimeoutSec = config.backlightTimeoutSec;
+  stored.v5.checksum = checksum(reinterpret_cast<const uint8_t *>(&stored.v5),
+                                offsetof(PersistedConfigV5, checksum));
 
   const size_t written =
-      preferences.putBytes(kConfigKey, &stored.v4, sizeof(stored.v4));
-  if (written != sizeof(stored.v4)) {
+      preferences.putBytes(kConfigKey, &stored.v5, sizeof(stored.v5));
+  if (written != sizeof(stored.v5)) {
     setError(error, errorCapacity, "Preferences write failed");
     return false;
   }

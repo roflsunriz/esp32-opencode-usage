@@ -57,11 +57,20 @@ void test_startup_held_button_is_ignored_and_clock_wrap_is_safe() {
 }
 
 void test_flipped_touch_maps_all_buttons_and_tabs() {
-  // The Display tab now uses sliders instead of the retired 3x3 grid.
-  const uint16_t centerX = static_cast<uint16_t>(
-      (touch_ui::kSliderTrackX0 + touch_ui::kSliderTrackX1) / 2);
+  // The Display tab uses two vertical drums plus the polling slider.
+  const uint16_t xRows[] = {
+      static_cast<uint16_t>((touch_ui::kMinutesWheelX0 +
+                             touch_ui::kMinutesWheelX1) /
+                            2),
+      static_cast<uint16_t>((touch_ui::kHoursWheelX0 +
+                             touch_ui::kHoursWheelX1) /
+                            2),
+      static_cast<uint16_t>((touch_ui::kSliderTrackX0 +
+                             touch_ui::kSliderTrackX1) /
+                            2),
+  };
   const uint16_t yRows[] = {
-      touch_ui::kSliderMinutesY, touch_ui::kSliderHoursY,
+      touch_ui::kWheelCenterY, touch_ui::kWheelCenterY,
       touch_ui::kSliderPollY,
   };
   const touch_ui::ActionKind expectedKinds[] = {
@@ -69,18 +78,18 @@ void test_flipped_touch_maps_all_buttons_and_tabs() {
       touch_ui::ActionKind::kPollInterval,
   };
   for (uint8_t index = 0; index < 3; ++index) {
-    const auto action = touch_ui::hitTest(touch_ui::Tab::kDisplay, centerX,
+    const auto action = touch_ui::hitTest(touch_ui::Tab::kDisplay, xRows[index],
                                           yRows[index]);
     TEST_ASSERT_EQUAL_INT(static_cast<int>(expectedKinds[index]),
                           static_cast<int>(action.kind));
   }
   // A flipped board still lands on the same rows: raw (2000, 2000) maps to
-  // screen (169, 124), inside the hours slider row.
+  // screen (169, 124), inside the minutes drum.
   const auto flipped = touch_ui::mapPoint(2000, 2000, true);
   TEST_ASSERT_EQUAL_UINT16(169, flipped.x);
   TEST_ASSERT_EQUAL_UINT16(124, flipped.y);
   TEST_ASSERT_EQUAL_INT(
-      static_cast<int>(touch_ui::ActionKind::kSleepHours),
+      static_cast<int>(touch_ui::ActionKind::kSleepMinutes),
       static_cast<int>(
           touch_ui::hitTest(touch_ui::Tab::kDisplay, flipped.x, flipped.y)
               .kind));

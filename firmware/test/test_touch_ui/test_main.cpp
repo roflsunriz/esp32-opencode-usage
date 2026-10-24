@@ -149,27 +149,27 @@ void test_slider_value_round_trips_with_track_ends() {
   TEST_ASSERT_EQUAL_UINT32(0, middle % 60);
 }
 
-void test_slider_rows_hit_test_with_content_coordinates() {
-  const int16_t minuteX =
-      touch_ui::sliderXFromValue(30, 0, 59);
-  touch_ui::Action minutes =
-      touch_ui::hitTestDisplaySliders(minuteX, touch_ui::kSliderMinutesY);
+void test_wheel_and_slider_controls_hit_test_with_content_coordinates() {
+  const uint32_t timeout = backlight_timer::sleepTimeoutFromParts(30, 2);
+  touch_ui::Action minutes = touch_ui::hitTestDisplayControls(
+      (touch_ui::kMinutesWheelX0 + touch_ui::kMinutesWheelX1) / 2,
+      touch_ui::kWheelCenterY + touch_ui::kWheelRowHeight, timeout);
   TEST_ASSERT_EQUAL_INT(
       static_cast<int>(touch_ui::ActionKind::kSleepMinutes),
       static_cast<int>(minutes.kind));
-  TEST_ASSERT_EQUAL_UINT32(30, minutes.timeoutSec);
+  TEST_ASSERT_EQUAL_UINT32(31, minutes.timeoutSec);
 
-  const int16_t hourX = touch_ui::sliderXFromValue(2, 0, 24);
-  touch_ui::Action hours =
-      touch_ui::hitTestDisplaySliders(hourX, touch_ui::kSliderHoursY);
+  touch_ui::Action hours = touch_ui::hitTestDisplayControls(
+      (touch_ui::kHoursWheelX0 + touch_ui::kHoursWheelX1) / 2,
+      touch_ui::kWheelCenterY - touch_ui::kWheelRowHeight, timeout);
   TEST_ASSERT_EQUAL_INT(
       static_cast<int>(touch_ui::ActionKind::kSleepHours),
       static_cast<int>(hours.kind));
-  TEST_ASSERT_EQUAL_UINT32(2, hours.timeoutSec);
+  TEST_ASSERT_EQUAL_UINT32(1, hours.timeoutSec);
 
   const int16_t pollX = touch_ui::sliderXFromValue(300, 60, 600);
   touch_ui::Action poll =
-      touch_ui::hitTestDisplaySliders(pollX, touch_ui::kSliderPollY);
+      touch_ui::hitTestDisplayControls(pollX, touch_ui::kSliderPollY, timeout);
   TEST_ASSERT_EQUAL_INT(
       static_cast<int>(touch_ui::ActionKind::kPollInterval),
       static_cast<int>(poll.kind));
@@ -178,7 +178,11 @@ void test_slider_rows_hit_test_with_content_coordinates() {
   TEST_ASSERT_EQUAL_INT(
       static_cast<int>(touch_ui::ActionKind::kNone),
       static_cast<int>(
-          touch_ui::hitTestDisplaySliders(minuteX, 10).kind));
+          touch_ui::hitTestDisplayControls(100, 10, timeout).kind));
+  TEST_ASSERT_EQUAL_UINT32(
+      32, touch_ui::wheelValueForDrag(30, 120, 76, 59));
+  TEST_ASSERT_EQUAL_UINT32(
+      0, touch_ui::wheelValueForDrag(1, 100, 200, 59));
   TEST_ASSERT_EQUAL_INT(0, touch_ui::clampScroll(-5));
   TEST_ASSERT_EQUAL_INT(touch_ui::kDisplayScrollMax,
                         touch_ui::clampScroll(9999));
@@ -226,11 +230,13 @@ void test_switches_tabs_only_in_the_header() {
 }
 
 void test_display_tab_routes_sliders_and_scrollbar() {
-  // Slider rows resolve through the tab-level hit test without scrolling.
-  const int16_t minuteX = touch_ui::sliderXFromValue(30, 0, 59);
+  // The minute drum resolves through the tab-level hit test without scrolling.
+  const int16_t minuteX =
+      (touch_ui::kMinutesWheelX0 + touch_ui::kMinutesWheelX1) / 2;
   const touch_ui::Action routed = touch_ui::hitTest(
       touch_ui::Tab::kDisplay, static_cast<uint16_t>(minuteX),
-      static_cast<uint16_t>(touch_ui::kSliderMinutesY));
+      static_cast<uint16_t>(touch_ui::kWheelCenterY), 0,
+      backlight_timer::sleepTimeoutFromParts(30, 2));
   TEST_ASSERT_EQUAL_INT(
       static_cast<int>(touch_ui::ActionKind::kSleepMinutes),
       static_cast<int>(routed.kind));
@@ -239,7 +245,8 @@ void test_display_tab_routes_sliders_and_scrollbar() {
   // lands 20 content pixels lower.
   const touch_ui::Action scrolled = touch_ui::hitTest(
       touch_ui::Tab::kDisplay, static_cast<uint16_t>(minuteX),
-      static_cast<uint16_t>(touch_ui::kSliderMinutesY - 20), 20);
+      static_cast<uint16_t>(touch_ui::kWheelCenterY - 20), 20,
+      backlight_timer::sleepTimeoutFromParts(30, 2));
   TEST_ASSERT_EQUAL_INT(
       static_cast<int>(touch_ui::ActionKind::kSleepMinutes),
       static_cast<int>(scrolled.kind));
@@ -271,7 +278,7 @@ int runTests() {
   RUN_TEST(test_sprite_clear_covers_full_320_pixel_width);
   RUN_TEST(test_latches_each_contact_until_penirq_is_high_for_twenty_ms);
   RUN_TEST(test_slider_value_round_trips_with_track_ends);
-  RUN_TEST(test_slider_rows_hit_test_with_content_coordinates);
+  RUN_TEST(test_wheel_and_slider_controls_hit_test_with_content_coordinates);
   RUN_TEST(test_scrollbar_drag_tracks_finger_proportionally);
   RUN_TEST(test_switches_tabs_only_in_the_header);
   RUN_TEST(test_display_tab_routes_sliders_and_scrollbar);

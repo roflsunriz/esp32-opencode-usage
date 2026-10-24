@@ -264,6 +264,28 @@ void test_loads_display_setting_from_a_valid_disabled_wifi_record() {
   TEST_ASSERT_EQUAL_UINT32(15, config.backlightTimeoutSec);
 }
 
+void test_migrates_schema4_with_usage_wake_disabled() {
+  CurrentV4 saved = {};
+  saved.schemaVersion = 4;
+  saved.enabled = 0;
+  saved.reserved[0] = 1;
+  saved.pollIntervalSec = config_store::kDefaultPollIntervalSec;
+  saved.backlightTimeoutSec = 120;
+  saved.checksum = crc32(reinterpret_cast<const uint8_t *>(&saved),
+                         offsetof(CurrentV4, checksum));
+  Preferences::setFixture(&saved, sizeof(saved));
+  config_store::WiFiConfig config;
+  config_store::ConfigStore store;
+  TEST_ASSERT_FALSE(store.load(config));
+  TEST_ASSERT_TRUE(config.screenFlipped);
+  TEST_ASSERT_FALSE(config.usageChangeWake);
+  const auto *migrated =
+      reinterpret_cast<const CurrentV4 *>(Preferences::data());
+  TEST_ASSERT_EQUAL_UINT32(config_store::kConfigSchemaVersion,
+                           migrated->schemaVersion);
+  TEST_ASSERT_EQUAL_UINT8(0, migrated->reserved[1]);
+}
+
 void test_rejects_current_record_with_invalid_flip_value() {
   CurrentV4 saved = {};
   saved.schemaVersion = config_store::kConfigSchemaVersion;
@@ -275,6 +297,22 @@ void test_rejects_current_record_with_invalid_flip_value() {
                          offsetof(CurrentV4, checksum));
   Preferences::setFixture(&saved, sizeof(saved));
   static config_store::WiFiConfig config;
+  config_store::ConfigStore store;
+  TEST_ASSERT_FALSE(store.load(config));
+  TEST_ASSERT_EQUAL_UINT32(0, Preferences::size());
+}
+
+void test_rejects_current_record_with_invalid_usage_wake_value() {
+  CurrentV4 saved = {};
+  saved.schemaVersion = config_store::kConfigSchemaVersion;
+  saved.enabled = 0;
+  saved.reserved[1] = 2;
+  saved.pollIntervalSec = config_store::kDefaultPollIntervalSec;
+  saved.backlightTimeoutSec = config_store::kDefaultBacklightTimeoutSec;
+  saved.checksum = crc32(reinterpret_cast<const uint8_t *>(&saved),
+                         offsetof(CurrentV4, checksum));
+  Preferences::setFixture(&saved, sizeof(saved));
+  config_store::WiFiConfig config;
   config_store::ConfigStore store;
   TEST_ASSERT_FALSE(store.load(config));
   TEST_ASSERT_EQUAL_UINT32(0, Preferences::size());
@@ -305,12 +343,14 @@ void test_save_persists_screen_flip() {
   config_store::WiFiConfig config;
   config_store::reset(config);
   config.screenFlipped = true;
+  config.usageChangeWake = true;
   char error[96] = {};
   config_store::ConfigStore store;
   TEST_ASSERT_TRUE(store.save(config, error, sizeof(error)));
   TEST_ASSERT_EQUAL_UINT32(sizeof(CurrentV4), Preferences::size());
   const auto *saved = reinterpret_cast<const CurrentV4 *>(Preferences::data());
   TEST_ASSERT_EQUAL_UINT8(1, saved->reserved[0]);
+  TEST_ASSERT_EQUAL_UINT8(1, saved->reserved[1]);
   TEST_ASSERT_EQUAL_UINT32(crc32(reinterpret_cast<const uint8_t *>(saved),
                                  offsetof(CurrentV4, checksum)),
                            saved->checksum);
@@ -366,7 +406,9 @@ int runTests() {
   RUN_TEST(test_schema3_migration_write_failure_preserves_legacy_until_next_load);
   RUN_TEST(test_rejects_a_schema2_record_with_invalid_crc);
   RUN_TEST(test_loads_display_setting_from_a_valid_disabled_wifi_record);
+  RUN_TEST(test_migrates_schema4_with_usage_wake_disabled);
   RUN_TEST(test_rejects_current_record_with_invalid_flip_value);
+  RUN_TEST(test_rejects_current_record_with_invalid_usage_wake_value);
   RUN_TEST(test_rejects_legacy_auth_cookie_scheme);
   RUN_TEST(test_save_persists_screen_flip);
   RUN_TEST(test_save_reports_preferences_write_failure);

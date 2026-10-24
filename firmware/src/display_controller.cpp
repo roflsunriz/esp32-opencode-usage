@@ -17,7 +17,6 @@ constexpr uint16_t kBarBackground = 0x4208;
 constexpr uint16_t kActiveTab = ILI9341_CYAN;
 constexpr uint16_t kInactiveTab = 0x4208;
 constexpr uint16_t kSelectedButton = 0x05E0;
-constexpr uint16_t kButton = 0x2965;
 constexpr int16_t kFooterTop = touch_ui::kFooterTop;
 constexpr int16_t kRowHeight = 62;
 constexpr int16_t kFirstRowTop = touch_ui::kTabHeight + 2;
@@ -443,21 +442,22 @@ bool DisplayController::pollTouch(TouchEvent &event) {
         }
         touch_ui::Action dragAction;
         if (dragMode_ == touch_ui::ActionKind::kSleepMinutes ||
-            dragMode_ == touch_ui::ActionKind::kSleepHours ||
-            dragMode_ == touch_ui::ActionKind::kPollInterval) {
-          uint32_t minV = 0, maxV = 1, step = 1;
-          if (dragMode_ == touch_ui::ActionKind::kSleepMinutes) {
-            maxV = backlight_timer::kSleepMinutesMax;
-          } else if (dragMode_ == touch_ui::ActionKind::kSleepHours) {
-            maxV = backlight_timer::kSleepHoursMax;
-          } else {
-            minV = backlight_timer::kPollSliderMinSec;
-            maxV = backlight_timer::kPollSliderMaxSec;
-            step = backlight_timer::kPollSliderStepSec;
-          }
+            dragMode_ == touch_ui::ActionKind::kSleepHours) {
+          const uint32_t maximum =
+              dragMode_ == touch_ui::ActionKind::kSleepMinutes
+                  ? backlight_timer::kSleepMinutesMax
+                  : backlight_timer::kSleepHoursMax;
           dragAction = touch_ui::Action(
-              dragMode_,
-              touch_ui::sliderValueFromX(dragPoint.x, minV, maxV, step));
+              dragMode_, touch_ui::wheelValueForDrag(
+                             dragStartValue_, dragStartY_, dragPoint.y,
+                             maximum));
+        } else if (dragMode_ == touch_ui::ActionKind::kPollInterval) {
+          dragAction = touch_ui::Action(
+              dragMode_, touch_ui::sliderValueFromX(
+                             dragPoint.x,
+                             backlight_timer::kPollSliderMinSec,
+                             backlight_timer::kPollSliderMaxSec,
+                             backlight_timer::kPollSliderStepSec));
         } else if (dragMode_ == touch_ui::ActionKind::kDisplayScroll) {
           dragAction = touch_ui::Action(
               touch_ui::ActionKind::kDisplayScroll,
@@ -522,17 +522,21 @@ bool DisplayController::pollTouch(TouchEvent &event) {
   event.kind = TouchEventKind::kTap;
   event.hasCoordinates = true;
   event.action = touch_ui::hitTest(activeTab_, event.point.x, event.point.y,
-                                   displayScroll_);
+                                   displayScroll_, displayedTimeoutSec_);
   // Fix the drag gesture mode at tap time: slider rows and the scrollbar
   // keep their own mapping while the contact continues, and taps anywhere
   // else become relative whole-content scrolls. Taps starting on the tab
   // bar never scroll.
   dragActive_ = true;
   dragMode_ = event.action.kind;
-  dragStartedInHeader_ = event.point.y < touch_ui::kTabHeight;
+  dragStartedInHeader_ =
+      event.point.y < touch_ui::kTabHeight ||
+      event.action.kind == touch_ui::ActionKind::kUsageChangeWake ||
+      event.action.kind == touch_ui::ActionKind::kScreenOff;
   dragStartX_ = event.point.x;
   dragStartY_ = event.point.y;
   dragStartScroll_ = displayScroll_;
+  dragStartValue_ = event.action.timeoutSec;
   if (event.action.kind == touch_ui::ActionKind::kSleepMinutes ||
       event.action.kind == touch_ui::ActionKind::kSleepHours ||
       event.action.kind == touch_ui::ActionKind::kPollInterval ||
@@ -558,6 +562,33 @@ bool DisplayController::setBacklightTimeoutSec(uint32_t timeoutSec) {
   }
   portEXIT_CRITICAL(&backlightMux_);
   return true;
+}
+
+void DisplayController::setUsageChangeWake(bool enabled) {
+  const uint32_t currentMs = nowMs();
+  portENTER_CRITICAL(&backlightMux_);
+  backlight_.setUsageChangeMode(enabled, currentMs);
+  displayedUsageChangeWake_ = enabled;
+  portEXIT_CRITICAL(&backlightMux_);
+}
+
+void DisplayController::notifyUsageChanged() {
+  const uint32_t currentMs = nowMs();
+  portENTER_CRITICAL(&backlightMux_);
+  if (backlight_.notifyUsageChanged(currentMs)) {
+    setBacklightPinLocked(true);
+    backlightStateChanged_ = true;
+  }
+  portEXIT_CRITICAL(&backlightMux_);
+}
+
+void DisplayController::sleepBacklight() {
+  portENTER_CRITICAL(&backlightMux_);
+  if (backlight_.sleepNow()) {
+    setBacklightPinLocked(false);
+    backlightStateChanged_ = true;
+  }
+  portEXIT_CRITICAL(&backlightMux_);
 }
 
 void DisplayController::wakeBacklight() {
@@ -659,85 +690,6 @@ void DisplayController::drawHeader(TFT_eSPI &surface) {
                        usageActive ? kInactiveTab : kActiveTab);
   surface.setCursor(180, 12);
   surface.print("Display");
-}
-
-void DisplayController::drawDisplaySettings(TFT_eSPI &surface,
-                                             uint32_t selectedTimeoutSec) {
-  const uint32_t minutes =
-      backlight_timer::sleepMinutesPart(selectedTimeoutSec);
-  const uint32_t hours = backlight_timer::sleepHoursPart(selectedTimeoutSec);
-  const int16_t scroll = touch_ui::clampScroll(displayScroll_);
-  auto contentY = [scroll](int16_t y) -> int16_t {
-    return static_cast<int16_t>(y - scroll);
-  };
-  auto drawSlider = [&](int16_t centerY, uint32_t value, uint32_t minV,
-                        uint32_t maxV) {
-    const int16_t y = contentY(centerY);
-    // Keep the tab header (0..40) and footer (228..240) free from scrolled
-    // content: skip unless the whole thumb fits in the content area.
-    if (y < touch_ui::kTabHeight + 8 || y > kFooterTop - 9) {
-      return;
-    }
-    surface.drawRect(touch_ui::kSliderTrackX0, y - 2,
-                     touch_ui::kSliderTrackX1 - touch_ui::kSliderTrackX0,
-                     5, ILI9341_WHITE);
-    const int16_t thumbX = touch_ui::sliderXFromValue(value, minV, maxV);
-    surface.fillRect(
-        touch_ui::kSliderTrackX0, y - 2,
-        static_cast<int16_t>(thumbX - touch_ui::kSliderTrackX0), 5,
-        kActiveTab);
-    surface.fillRect(thumbX - 6, y - 8, 12, 17, ILI9341_WHITE);
-    surface.fillRect(thumbX - 4, y - 6, 8, 13, kButton);
-  };
-  auto drawLine = [&](int16_t y, const char *text, uint16_t color) {
-    const int16_t visible = contentY(y);
-    if (visible < touch_ui::kTabHeight ||
-        visible > kFooterTop - 10) {
-      return;
-    }
-    drawTextClipped(surface, text, 6, visible, 1, color,
-                    touch_ui::kDisplayWidth - 30);
-  };
-  char line[56] = {};
-  if (selectedTimeoutSec == 0) {
-    snprintf(line, sizeof(line), "Off after: always on");
-  } else {
-    snprintf(line, sizeof(line), "Off after: %uh %02um", hours, minutes);
-  }
-  drawLine(46, line, ILI9341_WHITE);
-  snprintf(line, sizeof(line), "Minutes 0-59: %um", minutes);
-  drawLine(64, line, ILI9341_LIGHTGREY);
-  drawSlider(touch_ui::kSliderMinutesY, minutes, 0,
-             backlight_timer::kSleepMinutesMax);
-  snprintf(line, sizeof(line), "Hours 0-24: %uh", hours);
-  drawLine(114, line, ILI9341_LIGHTGREY);
-  drawSlider(touch_ui::kSliderHoursY, hours, 0,
-             backlight_timer::kSleepHoursMax);
-  snprintf(line, sizeof(line), "Update 60-600s: %us", displayedPollSec_);
-  drawLine(164, line, ILI9341_LIGHTGREY);
-  drawSlider(touch_ui::kSliderPollY, displayedPollSec_,
-             backlight_timer::kPollSliderMinSec,
-             backlight_timer::kPollSliderMaxSec);
-  drawLine(196, "0m 0h = always on", ILI9341_LIGHTGREY);
-  drawLine(208, "Tap a track to set", ILI9341_LIGHTGREY);
-  // Scrollbar on the right edge.
-  const int16_t trackH =
-      touch_ui::kScrollBarY1 - touch_ui::kScrollBarY0;
-  surface.drawRect(touch_ui::kScrollBarX0, touch_ui::kScrollBarY0, 12,
-                   trackH, kBarBackground);
-  const int16_t thumbH = static_cast<int16_t>(
-      (static_cast<int32_t>(touch_ui::kDisplayVisibleHeight) * trackH) /
-      touch_ui::kDisplayContentHeight);
-  const int16_t travel = trackH - thumbH;
-  const int16_t thumbY0 =
-      travel <= 0 || touch_ui::kDisplayScrollMax <= 0
-          ? touch_ui::kScrollBarY0
-          : static_cast<int16_t>(
-                touch_ui::kScrollBarY0 +
-                (static_cast<int32_t>(scroll) * travel) /
-                    touch_ui::kDisplayScrollMax);
-  surface.fillRect(touch_ui::kScrollBarX0 + 2, thumbY0, 8, thumbH,
-                   ILI9341_WHITE);
 }
 
 void DisplayController::drawUsage(TFT_eSPI &surface) {

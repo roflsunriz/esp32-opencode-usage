@@ -15,7 +15,7 @@ constexpr uint32_t kDefaultBacklightTimeoutSec = 60;
 // Version 4 adds an authentication-only update that preserves Wi-Fi and
 // display settings. This is independent from the Preferences record schema.
 constexpr uint32_t kSetupSchemaVersion = 4;
-constexpr uint32_t kConfigSchemaVersion = 4;
+constexpr uint32_t kConfigSchemaVersion = 5;
 
 struct WiFiConfig {
   bool enabled = false;
@@ -27,6 +27,7 @@ struct WiFiConfig {
   uint32_t pollIntervalSec = kDefaultPollIntervalSec;
   uint32_t backlightTimeoutSec = kDefaultBacklightTimeoutSec;
   bool screenFlipped = false;
+  bool usageChangeWake = false;
 };
 
 void reset(WiFiConfig &config);

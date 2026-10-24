@@ -31,6 +31,20 @@ uint32_t lastFreshUsageMs = 0;
 bool staleReported = false;
 uint32_t deferNetworkUntilMs = 0;
 
+bool usageAmountChanged(const usage_model::UsageSnapshot &before,
+                        const usage_model::UsageSnapshot &after) {
+  if (!before.valid || !after.valid || before.updatedAt == after.updatedAt) {
+    return false;
+  }
+  const auto periodChanged = [](const usage_model::PeriodUsage &left,
+                                const usage_model::PeriodUsage &right) {
+    return left.valid && right.valid && left.used != right.used;
+  };
+  return periodChanged(before.rolling, after.rolling) ||
+         periodChanged(before.weekly, after.weekly) ||
+         periodChanged(before.monthly, after.monthly);
+}
+
 void setErrorText(char *error, size_t capacity, const char *message) {
   if (error != nullptr && capacity > 0) {
     snprintf(error, capacity, "%s", message);
@@ -242,6 +256,7 @@ void addBacklightState(JsonDocument &document, bool includeRemaining) {
   document["screenFlipped"] = wifiConfig.screenFlipped;
   document["backlightOn"] = display.backlightOn();
   document["backlightTimeoutSec"] = display.backlightTimeoutSec();
+  document["usageChangeWake"] = wifiConfig.usageChangeWake;
   if (includeRemaining) {
     document["backlightRemainingMs"] = display.backlightRemainingMs();
   }
@@ -412,6 +427,17 @@ bool applyBacklightTimeout(uint32_t timeoutSec, char *error,
   return true;
 }
 
+bool applyUsageChangeWake(bool enabled, char *error, size_t errorCapacity) {
+  const bool previous = wifiConfig.usageChangeWake;
+  wifiConfig.usageChangeWake = enabled;
+  if (!configStore.save(wifiConfig, error, errorCapacity)) {
+    wifiConfig.usageChangeWake = previous;
+    return false;
+  }
+  display.setUsageChangeWake(enabled);
+  return true;
+}
+
 const char *touchEventName(TouchEventKind kind) {
   switch (kind) {
   case TouchEventKind::kWakeOnly:
@@ -438,6 +464,10 @@ const char *touchActionName(touch_ui::ActionKind kind) {
     return "sleep-hours";
   case touch_ui::ActionKind::kPollInterval:
     return "poll-interval";
+  case touch_ui::ActionKind::kUsageChangeWake:
+    return "usage-change-wake";
+  case touch_ui::ActionKind::kScreenOff:
+    return "screen-off";
   case touch_ui::ActionKind::kDisplayScroll:
     return "display-scroll";
   case touch_ui::ActionKind::kNone:
@@ -562,6 +592,26 @@ bool processTouch() {
     }
     break;
   }
+  case touch_ui::ActionKind::kUsageChangeWake: {
+    char error[kErrorCapacity] = {};
+    if (applyUsageChangeWake(!wifiConfig.usageChangeWake, error,
+                             sizeof(error))) {
+      display.showDisplayTab(wifiConfig.backlightTimeoutSec,
+                             wifiConfig.pollIntervalSec);
+      display.showStatus(wifiConfig.usageChangeWake
+                             ? "Usage wake enabled"
+                             : "Usage wake disabled",
+                         ILI9341_GREEN);
+      sendDisplayAck(nullptr);
+    } else {
+      display.showStatus(error, ILI9341_RED);
+      sendError(error);
+    }
+    break;
+  }
+  case touch_ui::ActionKind::kScreenOff:
+    display.sleepBacklight();
+    break;
   case touch_ui::ActionKind::kDisplayScroll:
     display.setDisplayScroll(static_cast<int16_t>(event.action.timeoutSec));
     break;
@@ -641,8 +691,12 @@ bool processFrame(const char *payload, const char *source) {
       lastFreshUsageMs = millis();
       staleReported = false;
     }
+    const bool amountChanged = hasUsage && usageAmountChanged(latestUsage, parsed);
     latestUsage = parsed;
     hasUsage = true;
+    if (amountChanged && wifiConfig.usageChangeWake) {
+      display.notifyUsageChanged();
+    }
     ++renderCount;
     display.renderSnapshot(latestUsage);
     if (staleReported)
@@ -673,8 +727,9 @@ bool processFrame(const char *payload, const char *source) {
       sendError(error);
       return false;
     }
-    // The PC setup protocol owns Wi-Fi/auth/timeout, not the BOOT preference.
+    // The PC setup protocol does not own the two on-device-only preferences.
     parsed.screenFlipped = wifiConfig.screenFlipped;
+    parsed.usageChangeWake = wifiConfig.usageChangeWake;
     if (!configStore.save(parsed, error, sizeof(error))) {
       sendError(error);
       return false;
@@ -682,6 +737,7 @@ bool processFrame(const char *payload, const char *source) {
     wifiConfig = parsed;
     networkClient.setConfig(wifiConfig);
     display.setBacklightTimeoutSec(wifiConfig.backlightTimeoutSec);
+    display.setUsageChangeWake(wifiConfig.usageChangeWake);
     if (display.activeTab() == touch_ui::Tab::kDisplay) {
       display.showDisplayTab(wifiConfig.backlightTimeoutSec, wifiConfig.pollIntervalSec);
     }
@@ -844,6 +900,7 @@ void setup() {
   // load() intentionally returns false for a valid disabled Wi-Fi record.
   // Its display timeout is still persisted and must survive that restart.
   display.setBacklightTimeoutSec(wifiConfig.backlightTimeoutSec);
+  display.setUsageChangeWake(wifiConfig.usageChangeWake);
   if (wifiConfigured) {
     networkClient.setConfig(wifiConfig);
     display.showStatus("WiFi config loaded", ILI9341_YELLOW);

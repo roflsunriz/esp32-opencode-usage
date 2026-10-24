@@ -24,6 +24,7 @@ constexpr uint32_t kSleepTimeoutMaxSec =
 constexpr uint32_t kPollSliderMinSec = 60;
 constexpr uint32_t kPollSliderMaxSec = 600;
 constexpr uint32_t kPollSliderStepSec = 60;
+constexpr uint32_t kUsageChangeWakeSec = 600;
 
 inline bool isSupportedTimeout(uint32_t timeoutSec) {
   return timeoutSec <= kSleepTimeoutMaxSec;
@@ -80,10 +81,31 @@ public:
     return changed;
   }
 
+  bool sleepNow() {
+    const bool changed = on_;
+    on_ = false;
+    return changed;
+  }
+
+  void setUsageChangeMode(bool enabled, uint32_t nowMs) {
+    if (usageChangeMode_ == enabled) return;
+    usageChangeMode_ = enabled;
+    lastActivityMs_ = nowMs;
+  }
+
+  bool usageChangeMode() const { return usageChangeMode_; }
+
+  bool notifyUsageChanged(uint32_t nowMs) {
+    return usageChangeMode_ ? wake(nowMs) : false;
+  }
+
   // Network/display updates intentionally do not call wake().
   // A timeout of 0 disables the auto-off (always on) and never expires.
   bool tick(uint32_t nowMs) {
-    if (!on_ || timeoutSec_ == 0 || elapsedMs(nowMs) < timeoutMs()) {
+    const uint32_t effectiveTimeout =
+        usageChangeMode_ ? kUsageChangeWakeSec : timeoutSec_;
+    if (!on_ || effectiveTimeout == 0 ||
+        elapsedMs(nowMs) < effectiveTimeout * 1000UL) {
       return false;
     }
     on_ = false;
@@ -97,11 +119,13 @@ public:
     if (!on_) {
       return 0;
     }
-    if (timeoutSec_ == 0) {
+    const uint32_t effectiveTimeout =
+        usageChangeMode_ ? kUsageChangeWakeSec : timeoutSec_;
+    if (effectiveTimeout == 0) {
       return UINT32_MAX;
     }
     const uint32_t elapsed = elapsedMs(nowMs);
-    const uint32_t timeout = timeoutMs();
+    const uint32_t timeout = effectiveTimeout * 1000UL;
     return elapsed >= timeout ? 0 : timeout - elapsed;
   }
 
@@ -112,6 +136,7 @@ private:
   uint32_t timeoutSec_ = kDefaultTimeoutSec;
   uint32_t lastActivityMs_ = 0;
   bool on_ = true;
+  bool usageChangeMode_ = false;
 };
 
 } // namespace backlight_timer

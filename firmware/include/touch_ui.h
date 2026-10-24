@@ -55,6 +55,8 @@ enum class ActionKind : uint8_t {
   kSleepMinutes,
   kSleepHours,
   kPollInterval,
+  kUsageChangeWake,
+  kScreenOff,
   kDisplayScroll
 };
 
@@ -299,10 +301,19 @@ constexpr int16_t kSliderTrackX0 = 14;
 constexpr int16_t kSliderTrackX1 = 296;
 constexpr int16_t kSliderThumbHalfW = 8;
 constexpr int16_t kSliderTouchHalfH = 14;
-constexpr int16_t kSliderMinutesY = 78;
-constexpr int16_t kSliderHoursY = 128;
-constexpr int16_t kSliderPollY = 178;
-constexpr int16_t kDisplayContentHeight = 240;
+constexpr int16_t kWheelRowHeight = 22;
+constexpr int16_t kWheelCenterY = 124;
+constexpr int16_t kWheelTopY = kWheelCenterY - kWheelRowHeight * 2 - 11;
+constexpr int16_t kWheelBottomY = kWheelCenterY + kWheelRowHeight * 2 + 11;
+constexpr int16_t kHoursWheelX0 = 14;
+constexpr int16_t kHoursWheelX1 = 148;
+constexpr int16_t kMinutesWheelX0 = 158;
+constexpr int16_t kMinutesWheelX1 = 296;
+constexpr int16_t kSliderPollY = 208;
+constexpr int16_t kUsageWakeButtonY = 242;
+constexpr int16_t kScreenOffButtonY = 280;
+constexpr int16_t kActionButtonHeight = 30;
+constexpr int16_t kDisplayContentHeight = 322;
 constexpr int16_t kDisplayVisibleHeight = kFooterTop - kTabHeight; // 188
 constexpr int16_t kDisplayScrollMax =
     kDisplayContentHeight - kDisplayVisibleHeight; // 52
@@ -317,6 +328,31 @@ inline int16_t clampScroll(int32_t scroll) {
   if (scroll < 0) return 0;
   if (scroll > kDisplayScrollMax) return kDisplayScrollMax;
   return static_cast<int16_t>(scroll);
+}
+
+inline int32_t wheelSteps(int32_t pixels) {
+  return pixels >= 0 ? (pixels + kWheelRowHeight / 2) / kWheelRowHeight
+                     : -((-pixels + kWheelRowHeight / 2) / kWheelRowHeight);
+}
+
+inline uint32_t clampWheelValue(int32_t value, uint32_t maximum) {
+  if (value < 0) return 0;
+  if (static_cast<uint32_t>(value) > maximum) return maximum;
+  return static_cast<uint32_t>(value);
+}
+
+inline uint32_t wheelValueForTap(uint32_t current, int16_t touchY,
+                                 int16_t centerY, uint32_t maximum) {
+  return clampWheelValue(static_cast<int32_t>(current) +
+                             wheelSteps(touchY - centerY),
+                         maximum);
+}
+
+inline uint32_t wheelValueForDrag(uint32_t start, int16_t startY,
+                                  int16_t currentY, uint32_t maximum) {
+  return clampWheelValue(static_cast<int32_t>(start) +
+                             wheelSteps(startY - currentY),
+                         maximum);
 }
 
 // Maps a screen X tap to a slider value, quantized to step. minV == maxV is
@@ -356,23 +392,24 @@ inline int16_t sliderXFromValue(uint32_t value, uint32_t minV,
 // Hit-tests the Display-tab slider rows. contentY is the tap position in
 // content space (screenY + scrollOffset). Returns kNone for taps outside the
 // slider rows; scrolling drags are handled by the controller.
-inline Action hitTestDisplaySliders(int16_t x, int16_t contentY) {
+inline Action hitTestDisplayControls(int16_t x, int16_t contentY,
+                                     uint32_t timeoutSec) {
+  if (contentY >= kWheelTopY && contentY < kWheelBottomY) {
+    if (x >= kHoursWheelX0 && x < kHoursWheelX1) {
+      return Action(ActionKind::kSleepHours,
+                    wheelValueForTap(
+                        backlight_timer::sleepHoursPart(timeoutSec), contentY,
+                        kWheelCenterY, backlight_timer::kSleepHoursMax));
+    }
+    if (x >= kMinutesWheelX0 && x < kMinutesWheelX1) {
+      return Action(ActionKind::kSleepMinutes,
+                    wheelValueForTap(
+                        backlight_timer::sleepMinutesPart(timeoutSec), contentY,
+                        kWheelCenterY, backlight_timer::kSleepMinutesMax));
+    }
+  }
   if (x < kSliderTrackX0 - kSliderThumbHalfW ||
-      x > kSliderTrackX1 + kSliderThumbHalfW) {
-    return Action();
-  }
-  if (contentY >= kSliderMinutesY - kSliderTouchHalfH &&
-      contentY < kSliderMinutesY + kSliderTouchHalfH) {
-    return Action(ActionKind::kSleepMinutes,
-                  sliderValueFromX(x, 0,
-                                   backlight_timer::kSleepMinutesMax, 1));
-  }
-  if (contentY >= kSliderHoursY - kSliderTouchHalfH &&
-      contentY < kSliderHoursY + kSliderTouchHalfH) {
-    return Action(ActionKind::kSleepHours,
-                  sliderValueFromX(x, 0, backlight_timer::kSleepHoursMax,
-                                   1));
-  }
+      x > kSliderTrackX1 + kSliderThumbHalfW) return Action();
   if (contentY >= kSliderPollY - kSliderTouchHalfH &&
       contentY < kSliderPollY + kSliderTouchHalfH) {
     return Action(ActionKind::kPollInterval,
@@ -400,7 +437,8 @@ inline int16_t displayScrollFromTrackY(int16_t y) {
   return clampScroll(offset);
 }
 
-inline Action hitTestDisplayTab(uint16_t x, uint16_t y, int16_t scroll) {
+inline Action hitTestDisplayTab(uint16_t x, uint16_t y, int16_t scroll,
+                                uint32_t timeoutSec) {
   const int16_t clamped = clampScroll(scroll);
   // Scrollbar first so it wins over the slider thumb end zone.
   if (x >= static_cast<uint16_t>(kScrollBarX0) && x < kDisplayWidth &&
@@ -431,12 +469,23 @@ inline Action hitTestDisplayTab(uint16_t x, uint16_t y, int16_t scroll) {
   if (y < kGridTop || y >= kFooterTop) {
     return Action();
   }
-  return hitTestDisplaySliders(static_cast<int16_t>(x),
-                               static_cast<int16_t>(y) + clamped);
+  const int16_t contentY = static_cast<int16_t>(y) + clamped;
+  if (x >= 14 && x < 296 && contentY >= kUsageWakeButtonY &&
+      contentY < kUsageWakeButtonY + kActionButtonHeight) {
+    return Action(ActionKind::kUsageChangeWake);
+  }
+  if (x >= 14 && x < 296 && contentY >= kScreenOffButtonY &&
+      contentY < kScreenOffButtonY + kActionButtonHeight) {
+    return Action(ActionKind::kScreenOff);
+  }
+  return hitTestDisplayControls(static_cast<int16_t>(x), contentY,
+                                timeoutSec);
 }
 
 inline Action hitTest(Tab activeTab, uint16_t x, uint16_t y,
-                      int16_t scroll = 0) {
+                      int16_t scroll = 0,
+                      uint32_t timeoutSec =
+                          backlight_timer::kDefaultTimeoutSec) {
   if (y < kTabHeight) {
     return Action(
         x < kTabWidth ? ActionKind::kUsageTab : ActionKind::kDisplayTab, 0);
@@ -444,7 +493,7 @@ inline Action hitTest(Tab activeTab, uint16_t x, uint16_t y,
   if (activeTab != Tab::kDisplay) {
     return Action();
   }
-  return hitTestDisplayTab(x, y, scroll);
+  return hitTestDisplayTab(x, y, scroll, timeoutSec);
 }
 
 } // namespace touch_ui

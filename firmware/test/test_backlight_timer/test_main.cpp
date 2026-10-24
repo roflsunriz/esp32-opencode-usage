@@ -95,6 +95,21 @@ void test_network_updates_do_not_extend_the_timeout() {
   TEST_ASSERT_TRUE(timer.tick(15000));
 }
 
+void test_manual_off_and_usage_change_mode() {
+  backlight_timer::Model timer;
+  timer.start(0, 0);
+  TEST_ASSERT_TRUE(timer.sleepNow());
+  TEST_ASSERT_FALSE(timer.isOn());
+  TEST_ASSERT_EQUAL_UINT32(0, timer.timeoutSec());
+  timer.setUsageChangeMode(true, 100);
+  TEST_ASSERT_TRUE(timer.notifyUsageChanged(1000));
+  TEST_ASSERT_FALSE(timer.tick(600999));
+  TEST_ASSERT_TRUE(timer.tick(601000));
+  TEST_ASSERT_FALSE(timer.isOn());
+  TEST_ASSERT_TRUE(timer.notifyUsageChanged(700000));
+  TEST_ASSERT_TRUE(timer.isOn());
+}
+
 void setUp() {}
 void tearDown() {}
 
@@ -107,6 +122,7 @@ int runTests() {
   RUN_TEST(test_wraparound_keeps_the_deadline_correct);
   RUN_TEST(test_wake_and_timeout_change_reset_the_deadline);
   RUN_TEST(test_network_updates_do_not_extend_the_timeout);
+  RUN_TEST(test_manual_off_and_usage_change_mode);
   return UNITY_END();
 }
 

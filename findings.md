@@ -12,3 +12,4 @@
 - 使用量JSONのサイズを固定しない。未使用枠のnull日時をinvalidと誤判定した実例がある。401/404/too-large/short body/invalid JSONを分離し、診断へ本文やCookieを含めない。
 - ローカルとReleaseのfirmwareは同sourceでもbyte不一致になった。ローカル実機検証を公開BINへ流用せず、release ZIPのBINをapp領域へ書いて設定保持とdigestを再確認する。
 - Dependabotがlockfile v2を読めない間は製品実行Bun 1.4系とlock生成Bun 1.3.14を分ける。version番号だけ手編集せず、parser対応変更時に生成script・lock・互換testを一緒に更新する。
+- Displayタブの時・分は2列の縦ドラムで選び、取得間隔だけ横スライダーを維持する。使用量変化点灯は初回取得を除外し、既存の有効な期間値が変わった時だけ10分タイマーを開始する。即時消灯は保存設定を変えず、同じ接触が復帰へ流れない入力ラッチを使う。
